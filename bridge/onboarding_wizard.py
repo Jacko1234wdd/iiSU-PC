@@ -81,8 +81,17 @@ class OnboardingWizard(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Welcome to iiSU-PC")
-        self.geometry("760x680")
-        self.minsize(700, 620)
+        # Tall enough that the Emulator Mappings step (title + description +
+        # a 9-row treeview + button row, the tallest of any step at ~420px
+        # of actual content) fits with room to spare -- measured empirically
+        # rather than guessed, since a too-short window doesn't just clip
+        # content, it squeezes the nav bar at the bottom and cuts off half
+        # of the Back/Next buttons (confirmed live: exactly what happened
+        # at the previous 680px height).
+        self.geometry("760x760")
+        # Matching minsize to the default height means the window can only
+        # be resized *up* from here, never back down into clipping range.
+        self.minsize(700, 760)
         self.configure(bg=BG)
         # Without this, a step with enough content (e.g. 10 scan-result
         # lines) makes the window silently grow to fit it, shifting the
