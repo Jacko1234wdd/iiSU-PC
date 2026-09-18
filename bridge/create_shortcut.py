@@ -146,7 +146,14 @@ def _refresh_shell_icon_cache() -> None:
 
 
 def create_desktop_shortcut() -> Path:
-    icon_path = extract_iisu_icon() or FALLBACK_ICON_PATH
+    extracted = extract_iisu_icon()
+    icon_path = extracted or FALLBACK_ICON_PATH
+    if extracted is None:
+        # extract_iisu_icon() already printed exactly why (missing Pillow,
+        # apktool failure, etc.) -- this makes the *consequence* visible
+        # too, since that diagnostic line is easy to miss buried in a long
+        # setup log, and the shortcut otherwise looks identical either way.
+        print("[shortcut] using the generic fallback icon, not iiSU's own -- see the line above for why")
     shortcut_path = desktop_dir() / SHORTCUT_NAME
     script = (
         "$shell = New-Object -ComObject WScript.Shell\n"

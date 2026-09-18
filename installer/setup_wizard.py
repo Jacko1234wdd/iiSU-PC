@@ -135,7 +135,12 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
         log_file = open(log_path, "wb")
         try:
             process = subprocess.Popen(
-                [str(emulator_exe), "-avd", avd_name, "-no-snapshot"],
+                # -no-window: nothing here needs the user to see or touch
+                # this boot -- it only installs the patched APK and the
+                # redirector stubs over adb, then shuts back down. The
+                # emulator still runs and responds to adb identically
+                # headless; only the visible window is skipped.
+                [str(emulator_exe), "-avd", avd_name, "-no-snapshot", "-no-window"],
                 creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,

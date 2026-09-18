@@ -37,6 +37,7 @@ import sys
 import time
 from pathlib import Path
 
+import sync_library
 from bridge_config import ConfigMissingError, load_config
 from portable_sdk import PORTABLE_AVD_HOME, PORTABLE_SDK, disable_quickboot_autosave, ensure_portable_sdk
 
@@ -230,6 +231,24 @@ def start_avd(avd_name: str, usb_passthrough: list[dict]) -> int | None:
     return None
 
 
+def sync_rom_library() -> None:
+    """Keeps the AVD's placeholder ROM tree in sync with the real library
+    on every start, rather than requiring a separate manual sync_library.py
+    run the onboarding wizard never mentions and nothing else ever calls --
+    confirmed live: without this, /sdcard/Roms never gets created at all,
+    so iiSU has nothing to scan no matter how the ROM directory is
+    configured. A sync failure (e.g. roms_dir temporarily unreachable on a
+    network share) shouldn't block starting the bridge, so this only
+    reports it."""
+    try:
+        sync_library.main()
+    except SystemExit as e:
+        if e.code not in (0, None):
+            print("[start] ROM library sync reported a problem (see above) -- continuing anyway")
+    except Exception as e:  # noqa: BLE001 -- reported, not fatal to starting up
+        print(f"[start] ROM library sync failed ({e}) -- continuing anyway")
+
+
 def main() -> None:
     try:
         config = load_config()
@@ -249,6 +268,9 @@ def main() -> None:
             sys.exit(1)
         state["emulator_pid"] = pid
         print(f"[start] {avd_name} is up.")
+
+    print("[start] Syncing your ROM library into the AVD...")
+    sync_rom_library()
 
     if is_port_open(port):
         print(f"[start] Bridge is already running on port {port}.")
