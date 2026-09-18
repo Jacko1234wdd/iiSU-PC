@@ -175,8 +175,15 @@ class SetupApp(tk.Tk):
 
         if error is None:
             self.status_label.config(text="Setup complete.", fg=GREEN)
-            messagebox.showinfo("Setup complete", "iiSU is installed and the bridge is configured.\n\nSee the buttons below for next steps.")
+            messagebox.showinfo(
+                "Setup complete",
+                "iiSU is installed and the bridge is configured.\n\n"
+                "Opening the settings window next -- point it at your ROM library and "
+                "review the emulator/display defaults there, so there's nothing left to "
+                "configure by hand afterward.",
+            )
             self._show_next_steps()
+            self._open_config_editor()
         else:
             self.status_label.config(text=f"Setup failed: {error}", fg=RED)
             messagebox.showerror("Setup failed", f"{error}\n\nSee the log for details.")
@@ -192,6 +199,19 @@ class SetupApp(tk.Tk):
             self.next_steps_frame, text="Create Desktop Shortcut", style="Ghost.TButton",
             command=self._create_shortcut,
         ).pack(side="left", padx=(10, 0))
+        ttk.Button(
+            self.next_steps_frame, text="Open Settings", style="Ghost.TButton",
+            command=self._open_config_editor,
+        ).pack(side="left", padx=(10, 0))
+
+    def _open_config_editor(self) -> None:
+        """Runs right after a successful setup, unprompted -- roms_dir still
+        holds the template's placeholder value at this point, so without
+        this the frontend would show an empty library until the user found
+        their own way to config_editor.py (normally tucked behind
+        control_panel.py's Configure button). Same invocation control_panel.py
+        itself uses, so it behaves identically either way it's opened."""
+        subprocess.Popen([sys.executable, "config_editor.py"], cwd=str(BRIDGE_DIR))
 
     def _create_shortcut(self) -> None:
         try:

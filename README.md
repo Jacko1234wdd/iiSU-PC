@@ -19,7 +19,9 @@ Runs iiSU (an Android emulation frontend) inside a Windows-hosted Android VM, pa
 1. Drop your iiSU APK into `installer/input/` (any filename, `.apk` extension).
 2. Run `Setup.bat` (in this folder).
 
-This downloads and sets up a self-contained Android SDK and virtual device (nothing touches any existing Android Studio install), patches your APK, gets it installed, and creates a desktop shortcut that launches straight into iiSU. It can take a while and several GB on first run.
+This downloads and sets up a self-contained Android SDK and virtual device (nothing touches any existing Android Studio install), patches your APK, gets it installed, installs a redirector app for every console `shared/emulator_defaults.py` knows about, and creates a desktop shortcut that launches straight into iiSU. It can take a while and several GB on first run.
+
+Once it's done, the settings window opens automatically so you can point it at your ROM library and review the emulator/display defaults right there — there's no separate manual-configuration step to remember afterward.
 
 Once everything's confirmed working, the installer deletes its own copy of the Android SDK (`installer/android-sdk/`, ~3.7GB) since `bridge/`'s portable copy has everything it needs going forward. The tradeoff: re-running `Setup.bat` later for a *different* iiSU APK re-downloads that SDK from scratch rather than reusing it.
 
