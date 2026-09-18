@@ -1,0 +1,431 @@
+"""
+iiSU launch bridge.
+
+Listens on the AVD's host-loopback address (10.0.2.2 from inside the emulator
+== this machine, on the configured port) for the raw Intent dump sent by the
+patched com.iisulauncher.pcbridge.LaunchBridge class. Each connection carries
+exactly one launch request; the socket is closed after the payload is sent.
+
+For each request, this:
+  1. Parses the component package name and ROM URI out of the Intent dump
+     (ROMs travel via ClipData, sent separately as CLIPURI: lines, since
+     Intent.toString() only shows a truncated placeholder for ClipData).
+  2. Matches the package name against config.json's "emulators" map to find
+     a PC emulator (name + fullscreen flag) and searches "search_roots" for
+     its executable.
+  3. Takes the ROM filename from the end of the URI and looks it up under
+     "roms_dir" by matching filename (the patched app can only tell us what
+     it knows about its own Android-side content URI, not a Windows path,
+     so both sides need to agree on ROM filenames living in roms_dir).
+  4. Minimizes the iiSU/AVD window, launches the matching emulator in
+     fullscreen, forces it to the foreground, and synthesizes a click so
+     keyboard/controller input is picked up immediately (Qt apps track
+     actual input focus on their render widget, separately from the OS-level
+     foreground window).
+  5. Waits for the emulator to exit (either normally, or forced via the
+     configured quit_hotkey) and restores the iiSU window (maximized if
+     "iisu_fullscreen" is set), mirroring how the real Android launcher
+     reappears once a game exits.
+
+All configuration (ROM directory, emulator search paths, package->emulator
+mappings, quit hotkey, display settings) lives in config.json next to this
+script. Window-management helpers live in winapi.py, shared with
+apply_display.py and config_editor.py. One Python stdlib script, no dependencies.
+"""
+
+import ctypes
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import threading
+import time
+from ctypes import wintypes
+from pathlib import Path
+from urllib.parse import unquote
+
+from controller_bridge import ControllerBridge
+from winapi import (
+    SW_MINIMIZE,
+    SW_RESTORE,
+    find_window_by_title,
+    force_foreground,
+    hide_emulator_toolbar,
+    make_fullscreen,
+    nudge_focus_with_click,
+    user32,
+    wait_for_window_by_pid,
+)
+
+CONFIG_PATH = Path(__file__).parent / "config.json"
+STOP_SCRIPT = Path(__file__).parent / "stop_iisu_pc.py"
+PATH_CACHE_PATH = Path(__file__).parent / ".path_cache.json"
+
+DEFAULT_IISU_COMPONENT = "com.iisulauncher/com.iisulauncher.launcher.StartupSafeModeActivity"
+
+user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
+user32.RegisterHotKey.restype = wintypes.BOOL
+user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
+user32.GetMessageW.restype = ctypes.c_int
+
+WM_HOTKEY = 0x0312
+QUIT_HOTKEY_ID = 1
+SHUTDOWN_HOTKEY_ID = 2
+MODIFIER_FLAGS = {"alt": 0x0001, "ctrl": 0x0002, "shift": 0x0004, "win": 0x0008}
+MOD_NOREPEAT = 0x4000
+
+HOST = "0.0.0.0"
+
+INTENT_CMP_RE = re.compile(r"cmp=(\S+)")
+INTENT_DAT_RE = re.compile(r"dat=(\S+)")
+
+# Set to the currently-running emulator Popen while a game is active, so the
+# quit hotkey listener (on its own thread) has something to terminate.
+current_process: subprocess.Popen | None = None
+current_process_lock = threading.Lock()
+
+
+def load_config() -> dict:
+    with open(CONFIG_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_path_cache() -> dict:
+    if not PATH_CACHE_PATH.is_file():
+        return {"executables": {}, "roms": {}}
+    try:
+        cache = json.loads(PATH_CACHE_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {"executables": {}, "roms": {}}
+    cache.setdefault("executables", {})
+    cache.setdefault("roms", {})
+    return cache
+
+
+def save_path_cache(cache: dict) -> None:
+    try:
+        PATH_CACHE_PATH.write_text(json.dumps(cache), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def find_executable(names: list[str], search_roots: list[Path], cache: dict) -> Path | None:
+    """rglob-scanning search_roots (which commonly include all of
+    C:/Program Files) on every single launch is real, avoidable latency --
+    the result almost never changes between launches, so it's cached by
+    exe name and only re-scanned if the cached path stops existing (e.g.
+    the emulator got moved/reinstalled elsewhere).
+
+    The cache key includes search_roots itself (not just the exe names),
+    so editing search_roots in config_editor.py naturally invalidates the old
+    entry instead of it staying wrong until the previously-found file
+    happens to disappear -- config_editor.py documents that path changes apply
+    on the very next launch with no restart needed, and a stale cache hit
+    would quietly break that."""
+    cache_key = "|".join(names) + "::" + "|".join(str(r) for r in search_roots)
+    cached = cache["executables"].get(cache_key)
+    if cached and Path(cached).is_file():
+        return Path(cached)
+
+    for root in search_roots:
+        if not root.is_dir():
+            continue
+        for name in names:
+            matches = list(root.rglob(name))
+            if matches:
+                cache["executables"][cache_key] = str(matches[0])
+                return matches[0]
+    cache["executables"].pop(cache_key, None)
+    return None
+
+
+def find_rom(rom_filename: str, roms_dir: Path, cache: dict) -> Path | None:
+    """Same caching approach as find_executable, keyed on roms_dir too so
+    changing it in config_editor.py doesn't risk returning a stale path."""
+    cache_key = f"{rom_filename}::{roms_dir}"
+    cached = cache["roms"].get(cache_key)
+    if cached and Path(cached).is_file():
+        return Path(cached)
+
+    if not roms_dir.is_dir():
+        return None
+    matches = list(roms_dir.rglob(rom_filename))
+    if matches:
+        cache["roms"][cache_key] = str(matches[0])
+        return matches[0]
+    cache["roms"].pop(cache_key, None)
+    return None
+
+
+def find_emulator_for_package(package: str, emulators: dict, rom_filename: str | None) -> dict | None:
+    """RetroArch (com.retroarch) is a multi-core, multi-console frontend on
+    the Android side -- iiSU reports the same package for it regardless of
+    which system the game actually is, so unlike every other (single-system)
+    package here, its profile can't just be "one PC exe". Its entry is
+    instead a "by_extension" map, resolved by the ROM's own file extension
+    to the real dedicated PC emulator for that system."""
+    for prefix, profile in emulators.items():
+        if not package.startswith(prefix):
+            continue
+        if "by_extension" in profile:
+            if rom_filename is None:
+                return None
+            ext = Path(rom_filename).suffix.lower()
+            return profile["by_extension"].get(ext)
+        return profile
+    return None
+
+
+def launch_iisu(config: dict) -> None:
+    """Starts iiSU's own main activity directly via adb, instead of leaving
+    the stock Android home screen showing after boot. iiSU declares both
+    LAUNCHER and HOME categories on this activity (it's designed to be a
+    home-screen replacement), but isn't necessarily set as this AVD's
+    default home app, so this just launches it directly rather than
+    depending on that. Retries for a while since `am start` can fail with a
+    transient "does not exist" error for the better part of a minute right
+    after a cold boot (without a quickboot snapshot, boot_completed can flip
+    to true before the package manager has fully finished resolving
+    components -- confirmed via `dumpsys package`, the activity is
+    genuinely registered, `am start` just tried too early)."""
+    component = config.get("iisu_component", DEFAULT_IISU_COMPONENT)
+    result = None
+    for _ in range(20):
+        result = subprocess.run(["adb", "shell", "am", "start", "-n", component], capture_output=True, text=True)
+        if result.returncode == 0 and "Error" not in result.stdout:
+            return
+        time.sleep(3)
+    print(f"[bridge] could not launch iiSU ({component}):")
+    if result is not None:
+        print(f"    {result.stdout.strip()}\n    {result.stderr.strip()}")
+
+
+def show_iisu_window(config: dict) -> None:
+    """Brings the iiSU/AVD window to the foreground, borderless-fullscreen
+    if "iisu_fullscreen" is set in config.json. Plain SW_MAXIMIZE doesn't
+    work on this window (it clamps its own max size), so true fullscreen
+    means stripping the title bar/border and resizing to the screen -- see
+    winapi.make_fullscreen."""
+    hwnd = find_window_by_title(config["iisu_window_title"])
+    if hwnd is None:
+        print("[bridge] could not locate iiSU window")
+        return
+    force_foreground(hwnd, SW_RESTORE)
+    if config.get("iisu_fullscreen"):
+        make_fullscreen(hwnd)
+        hide_emulator_toolbar()
+
+
+def bring_emulator_to_foreground(pid: int) -> None:
+    """Poll for the new process's main window (it takes a moment to appear
+    after Popen returns) and force it to the foreground once found."""
+    hwnd = wait_for_window_by_pid(pid)
+    if hwnd is None:
+        print("[bridge] could not locate emulator window to focus")
+        return
+    force_foreground(hwnd)
+    # Give the window a moment to finish becoming active before clicking it.
+    time.sleep(0.3)
+    nudge_focus_with_click(hwnd)
+
+
+def wait_and_restore_iisu(process: subprocess.Popen, config: dict) -> None:
+    """Runs on a background thread: waits for the emulator to close (whether
+    normally or via the quit hotkey), then un-hides and refocuses the iiSU
+    AVD window, mirroring how the real Android launcher reappears once a
+    game exits."""
+    process.wait()
+    with current_process_lock:
+        global current_process
+        if current_process is process:
+            current_process = None
+    show_iisu_window(config)
+
+
+def _register_hotkey(hotkey_config: dict, hotkey_id: int, purpose: str) -> str | None:
+    modifiers = MOD_NOREPEAT
+    for name in hotkey_config.get("modifiers", []):
+        modifiers |= MODIFIER_FLAGS.get(name.lower(), 0)
+
+    key = hotkey_config.get("key", "q")
+    vk = ord(key.upper()[0])
+
+    if not user32.RegisterHotKey(None, hotkey_id, modifiers, vk):
+        print(f"[bridge] failed to register {purpose} hotkey ({'+'.join(hotkey_config.get('modifiers', []))}+{key})")
+        return None
+    return "+".join([*hotkey_config.get("modifiers", []), key]).upper()
+
+
+def shutdown_everything() -> None:
+    """Closes iiSU and shuts down the whole Android subsystem: terminates
+    whatever PC emulator is currently running (if any), then hands off to
+    stop_iisu_pc.py for the graceful AVD/bridge teardown and exits this
+    process. Runs as a separate process because this one is about to exit
+    itself, and because stop_iisu_pc.py needs to be able to kill this
+    bridge process by PID."""
+    with current_process_lock:
+        proc = current_process
+    if proc is not None and proc.poll() is None:
+        proc.terminate()
+    subprocess.Popen(
+        [sys.executable, str(STOP_SCRIPT)],
+        creationflags=subprocess.CREATE_NEW_CONSOLE,
+        cwd=str(STOP_SCRIPT.parent),
+    )
+    os._exit(0)
+
+
+def hotkey_listener(config: dict) -> None:
+    """Registers the quit-to-frontend and full-shutdown global hotkeys and
+    dispatches them as they're pressed. Runs on its own thread with its own
+    message loop, since RegisterHotKey delivers WM_HOTKEY via the calling
+    thread's queue."""
+    quit_label = _register_hotkey(config["quit_hotkey"], QUIT_HOTKEY_ID, "quit-to-frontend")
+    if quit_label:
+        print(f"[bridge] {quit_label} will force-quit the running emulator and return to iiSU")
+
+    shutdown_hotkey_config = config.get("shutdown_hotkey")
+    shutdown_label = _register_hotkey(shutdown_hotkey_config, SHUTDOWN_HOTKEY_ID, "full shutdown") if shutdown_hotkey_config else None
+    if shutdown_label:
+        print(f"[bridge] {shutdown_label} will close iiSU and shut down the AVD entirely")
+
+    msg = wintypes.MSG()
+    while True:
+        result = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+        if result <= 0:
+            break
+        if msg.message != WM_HOTKEY:
+            continue
+        if msg.wParam == QUIT_HOTKEY_ID:
+            with current_process_lock:
+                proc = current_process
+            if proc is not None and proc.poll() is None:
+                print("[bridge] quit hotkey pressed, terminating emulator")
+                proc.terminate()
+        elif msg.wParam == SHUTDOWN_HOTKEY_ID:
+            print("[bridge] shutdown hotkey pressed, closing iiSU and the AVD...")
+            shutdown_everything()
+
+
+def handle_request(raw_intent: str) -> None:
+    print(f"[bridge] received: {raw_intent}")
+
+    # Reloaded fresh per request (not once at startup) so edits made in
+    # config_editor.py take effect on the very next launch without restarting
+    # the bridge process.
+    config = load_config()
+
+    cmp_match = INTENT_CMP_RE.search(raw_intent)
+    dat_match = INTENT_DAT_RE.search(raw_intent)
+    clip_uris = [
+        line.removeprefix("CLIPURI:")
+        for line in raw_intent.splitlines()
+        if line.startswith("CLIPURI:")
+    ]
+
+    if not cmp_match:
+        print("[bridge] no component in intent, ignoring")
+        return
+
+    component = cmp_match.group(1)
+    package = component.split("/")[0]
+    # iiSU passes the ROM file via ClipData (not the plain Intent data URI) at
+    # least for single/multi-file discs; Intent.toString() only shows a
+    # truncated placeholder for ClipData, so the patched app sends the real
+    # URI(s) separately as CLIPURI: lines.
+    data_uri = clip_uris[0] if clip_uris else (dat_match.group(1) if dat_match else None)
+
+    search_roots = [Path(p) for p in config["search_roots"]]
+    roms_dir = Path(config["roms_dir"])
+
+    rom_filename = unquote(data_uri).rsplit("/", 1)[-1] if data_uri else None
+
+    profile = find_emulator_for_package(package, config["emulators"], rom_filename)
+    if profile is None:
+        print(f"[bridge] no known PC emulator mapped for package '{package}' (rom '{rom_filename}')")
+        return
+
+    path_cache = load_path_cache()
+
+    executable = find_executable(profile["exe_names"], search_roots, path_cache)
+    if executable is None:
+        save_path_cache(path_cache)
+        print(f"[bridge] none of {profile['exe_names']} found under {search_roots}")
+        return
+
+    rom_path = None
+    if rom_filename:
+        rom_path = find_rom(rom_filename, roms_dir, path_cache)
+        if rom_path is None:
+            print(f"[bridge] rom '{rom_filename}' not found under {roms_dir}")
+
+    save_path_cache(path_cache)
+
+    args = [str(executable), *profile["pre_args"]]
+    if rom_path:
+        args.append(str(rom_path))
+
+    iisu_hwnd = find_window_by_title(config["iisu_window_title"])
+    if iisu_hwnd is not None:
+        user32.ShowWindow(iisu_hwnd, SW_MINIMIZE)
+    else:
+        print("[bridge] could not locate iiSU window to hide")
+
+    print(f"[bridge] launching: {args}")
+    process = subprocess.Popen(args, cwd=str(executable.parent))
+    with current_process_lock:
+        global current_process
+        current_process = process
+    bring_emulator_to_foreground(process.pid)
+    threading.Thread(
+        target=wait_and_restore_iisu, args=(process, config), daemon=True
+    ).start()
+
+
+def is_game_running() -> bool:
+    with current_process_lock:
+        return current_process is not None and current_process.poll() is None
+
+
+def main() -> None:
+    config = load_config()
+
+    threading.Thread(target=hotkey_listener, args=(config,), daemon=True).start()
+
+    threading.Thread(target=ControllerBridge(is_game_running).run, daemon=True).start()
+
+    # Launch iiSU directly rather than leaving the stock Android home
+    # screen showing, whether this is a fresh boot or the bridge is being
+    # restarted against an AVD that's already up.
+    print("[bridge] launching iiSU...")
+    launch_iisu(config)
+
+    # If the AVD is already running when the bridge starts, apply the
+    # fullscreen preference to it immediately rather than waiting for the
+    # first game to exit.
+    if config.get("iisu_fullscreen"):
+        show_iisu_window(config)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((HOST, config["bridge_port"]))
+        server.listen(5)
+        print(f"[bridge] listening on {HOST}:{config['bridge_port']}")
+        while True:
+            conn, addr = server.accept()
+            with conn:
+                chunks = []
+                while True:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                payload = b"".join(chunks).decode("utf-8", errors="replace")
+                if payload:
+                    handle_request(payload)
+
+
+if __name__ == "__main__":
+    main()

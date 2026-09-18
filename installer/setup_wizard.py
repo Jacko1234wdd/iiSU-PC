@@ -1,0 +1,285 @@
+"""
+First-time setup for iiSU-PC: bootstraps a self-contained Android SDK and
+AVD (sdk_bootstrap.py), patches a copy of iiSU that you supply yourself
+(patch_iisu.py) to redirect its ROM launches to a PC-side bridge, installs
+it, and points the bridge/ folder at the result.
+
+This never bundles or redistributes iiSU's own APK -- you need your own
+copy of it, same as you'd need for any other APK-patching tool. Drop it
+into input/ before running this (see the printed instructions below if
+none is found).
+
+Usage:
+    python setup_wizard.py
+"""
+
+import json
+import secrets
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import sdk_bootstrap
+from patch_iisu import patch_apk
+
+INSTALLER_DIR = Path(__file__).parent
+PROJECT_ROOT = INSTALLER_DIR.parent
+BRIDGE_DIR = PROJECT_ROOT / "bridge"
+INPUT_DIR = INSTALLER_DIR / "input"
+KEYSTORE_DIR = INSTALLER_DIR / "keystore"
+KEYSTORE_PATH = KEYSTORE_DIR / "iisu-pc.keystore"
+KEYSTORE_META_PATH = KEYSTORE_DIR / "keystore.json"
+KEY_ALIAS = "iisu-pc"
+WORK_DIR = INSTALLER_DIR / "_work"
+
+DEFAULT_AVD_NAME = "iisuwin"
+DEFAULT_DISPLAY = {"width": 1920, "height": 1080, "density": 240, "refresh_rate": 144}
+AVD_BOOT_TIMEOUT = 180
+
+DETACHED_PROCESS = 0x00000008
+CREATE_NEW_PROCESS_GROUP = 0x00000200
+
+
+def find_input_apk() -> Path | None:
+    apks = list(INPUT_DIR.glob("*.apk"))
+    return apks[0] if apks else None
+
+
+def require_java() -> None:
+    if shutil.which("java") is None:
+        raise RuntimeError(
+            "Java was not found on PATH. This installer needs a JDK (for apktool and key "
+            "generation) -- install one (e.g. Eclipse Temurin) and make sure `java` and "
+            "`keytool` are on PATH, then run this again."
+        )
+    if shutil.which("keytool") is None:
+        raise RuntimeError("`keytool` was not found on PATH (it ships with any JDK) -- check your Java install includes it.")
+
+
+def ensure_keystore() -> tuple[Path, str]:
+    """Generates a fresh, locally-unique signing key on first run -- each
+    install of this installer gets its own, rather than everyone who runs
+    it sharing one embedded in the distributed files."""
+    KEYSTORE_DIR.mkdir(parents=True, exist_ok=True)
+    if KEYSTORE_PATH.is_file() and KEYSTORE_META_PATH.is_file():
+        meta = json.loads(KEYSTORE_META_PATH.read_text(encoding="utf-8"))
+        return KEYSTORE_PATH, meta["password"]
+
+    password = secrets.token_hex(16)
+    print("[setup] generating a local signing key...")
+    result = subprocess.run(
+        [
+            "keytool", "-genkeypair", "-v",
+            "-keystore", str(KEYSTORE_PATH),
+            "-alias", KEY_ALIAS,
+            "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
+            "-storepass", password, "-keypass", password,
+            "-dname", "CN=iiSU-PC, OU=iiSU-PC, O=iiSU-PC, L=Local, S=Local, C=US",
+        ],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"keytool failed:\n{result.stdout}\n{result.stderr}")
+
+    KEYSTORE_META_PATH.write_text(json.dumps({"password": password}), encoding="utf-8")
+    return KEYSTORE_PATH, password
+
+
+def wait_for_avd(avd_name: str, timeout: float) -> bool:
+    """`adb devices` reporting "device" state only means the ADB link is
+    up -- it doesn't mean Android's own system services have finished
+    starting. `adb install` needs PackageManagerService specifically,
+    which can still be initializing well after ADB itself is reachable,
+    especially on an AVD's very first-ever cold boot -- it shows up as
+    `adb install` failing with "cmd: Can't find service: package" even
+    though ADB is already connected. sys.boot_completed is the actual
+    signal that the OS is done starting up."""
+    deadline = time.time() + timeout
+    connected = False
+    while time.time() < deadline:
+        if not connected:
+            result = subprocess.run(["adb", "devices"], capture_output=True, text=True)
+            connected = any(line.startswith("emulator-") and "device" in line for line in result.stdout.splitlines())
+            if not connected:
+                time.sleep(2)
+                continue
+        boot_check = subprocess.run(["adb", "shell", "getprop", "sys.boot_completed"], capture_output=True, text=True)
+        if boot_check.stdout.strip() == "1":
+            return True
+        time.sleep(2)
+    return False
+
+
+def is_avd_connected() -> bool:
+    result = subprocess.run(["adb", "devices"], capture_output=True, text=True)
+    return any(line.startswith("emulator-") and "device" in line for line in result.stdout.splitlines())
+
+
+def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_apk: Path) -> None:
+    process = None
+    if is_avd_connected():
+        # Resuming after an earlier failed attempt at this exact step: the
+        # emulator runs fully detached, so a previous run raising an
+        # exception here (e.g. the install itself failing) leaves it
+        # orphaned and still running rather than cleaning up after itself.
+        # Reuse it instead of launching a second instance against the same
+        # AVD, which would conflict.
+        print("[setup] an AVD instance is already up from an earlier attempt -- reusing it...")
+    else:
+        print("[setup] booting the AVD once to install iiSU (this can take a minute)...")
+        log_path = WORK_DIR / "first_boot_emulator.log"
+        log_file = open(log_path, "wb")
+        try:
+            process = subprocess.Popen(
+                [str(emulator_exe), "-avd", avd_name],
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                stdin=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
+                env=env,
+            )
+        finally:
+            log_file.close()
+
+    if not wait_for_avd(avd_name, AVD_BOOT_TIMEOUT):
+        raise RuntimeError(f"The AVD did not come up within {AVD_BOOT_TIMEOUT}s on its first boot. See {log_path} for details.")
+
+    print("[setup] installing the patched iiSU...")
+    result = None
+    for attempt in range(5):
+        result = subprocess.run(["adb", "install", "-r", str(patched_apk)], capture_output=True, text=True)
+        if "Can't find service: package" not in result.stdout and "Can't find service: package" not in result.stderr:
+            break
+        # sys.boot_completed=1 (checked above) still isn't an ironclad
+        # guarantee PackageManagerService itself has finished registering
+        # with the service manager, which can still happen on a fresh
+        # AVD's very first cold boot. A few seconds' grace clears it.
+        print(f"[setup] package service not ready yet, retrying ({attempt + 1}/5)...")
+        time.sleep(5)
+
+    if "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in result.stdout or "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in result.stderr:
+        # The AVD already has a copy of iiSU installed signed with a
+        # different key than this run's -- e.g. a previous setup attempt
+        # used a different keystore, or this AVD was reused from an
+        # unrelated earlier install. Safe to just replace it: at this
+        # point in first-time setup there's no bridge-managed app state on
+        # it worth preserving.
+        print("[setup] a differently-signed iiSU is already on this AVD -- removing it and reinstalling fresh...")
+        subprocess.run(["adb", "uninstall", "com.iisulauncher"], capture_output=True, text=True)
+        result = subprocess.run(["adb", "install", str(patched_apk)], capture_output=True, text=True)
+    if result.returncode != 0 or "Success" not in result.stdout:
+        raise RuntimeError(f"adb install failed:\n{result.stdout}\n{result.stderr}")
+
+    print("[setup] shutting the AVD back down (iiSU-PC.bat will bring it up properly from here on)...")
+    subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True)
+    deadline = time.time() + 15
+    while time.time() < deadline and is_avd_connected():
+        time.sleep(1)
+    if process is not None and process.poll() is None:
+        process.terminate()
+
+
+def cleanup_installer_sdk() -> None:
+    """Once bridge/portable_sdk.py has its own copy of the emulator,
+    platform-tools, and system image, installer/android-sdk/ (~3.7GB) and
+    the downloaded commandlinetools.zip (~156MB) are pure dead weight --
+    only build-tools (zipalign/apksigner) from it was ever needed post-copy,
+    and only for the one-time patch step above. Deleting them trades away
+    re-running Setup.bat for a *different* APK later without a fresh
+    multi-GB SDK re-download -- worth it for a one-time setup tool."""
+    reclaimed = 0
+    for path in (sdk_bootstrap.SDK_ROOT, INSTALLER_DIR / "commandlinetools.zip"):
+        if not path.exists():
+            continue
+        if path.is_dir():
+            reclaimed += sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+            shutil.rmtree(path)
+        else:
+            reclaimed += path.stat().st_size
+            path.unlink()
+    if reclaimed:
+        print(f"[setup] freed {reclaimed / 1e9:.1f} GB by removing the now-redundant installer-side SDK copy")
+
+
+def write_bridge_config(avd_name: str) -> None:
+    """Creates bridge/config.json from the generic template if this is a
+    fresh install (no config yet), or just patches avd_name/display into
+    whatever's already there -- so re-running this against an existing,
+    already-personalized setup (e.g. to rebuild a corrupted AVD) never
+    overwrites someone's real roms_dir/search_roots/emulators."""
+    config_path = BRIDGE_DIR / "config.json"
+    if config_path.is_file():
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    else:
+        config = json.loads((INSTALLER_DIR / "config.template.json").read_text(encoding="utf-8"))
+    config["avd_name"] = avd_name
+    config.setdefault("display", DEFAULT_DISPLAY)
+    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
+def run_setup(apk_path: Path) -> None:
+    """Does the actual work, given a source APK path -- shared by the CLI
+    entry point below and setup_gui.py, so both stay in sync with exactly
+    one implementation. Reports progress via plain print(), which the GUI
+    captures by redirecting sys.stdout for the duration of the call."""
+    print("=== iiSU-PC first-time setup ===\n")
+    require_java()
+    print(f"[setup] using {apk_path.name} as the source APK")
+
+    WORK_DIR.mkdir(parents=True, exist_ok=True)
+
+    print("[setup] setting up the Android SDK and a fresh AVD (this can take a long time on first run -- several GB)...")
+    avd_dir = sdk_bootstrap.ensure_sdk_and_avd(DEFAULT_AVD_NAME)
+    print(f"[setup] AVD ready: {avd_dir}")
+
+    keystore, keystore_password = ensure_keystore()
+
+    patched_apk = WORK_DIR / "iisu-patched.apk"
+    patch_apk(
+        source_apk=apk_path,
+        output_apk=patched_apk,
+        work_dir=WORK_DIR / "patch",
+        zipalign_exe=sdk_bootstrap.zipalign_exe(),
+        apksigner_exe=sdk_bootstrap.apksigner_bat(),
+        keystore=keystore,
+        keystore_pass=keystore_password,
+        key_alias=KEY_ALIAS,
+    )
+
+    sys.path.insert(0, str(BRIDGE_DIR))
+    import portable_sdk
+
+    print("[setup] copying the SDK/AVD into bridge/ as a portable, self-contained copy...")
+    env_overrides = portable_sdk.ensure_portable_sdk(DEFAULT_AVD_NAME, sdk_bootstrap.SDK_ROOT)
+
+    import os
+    env = os.environ.copy()
+    env.update(env_overrides)
+    emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / "emulator.exe"
+
+    boot_avd_and_install(emulator_exe, DEFAULT_AVD_NAME, env, patched_apk)
+
+    write_bridge_config(DEFAULT_AVD_NAME)
+    cleanup_installer_sdk()
+
+    print("\n=== Setup complete ===")
+    print(f"iiSU is installed and the bridge is configured for AVD '{DEFAULT_AVD_NAME}'.")
+    print("Run 'iiSU-PC.bat' (one folder up) to configure and launch.")
+
+
+def main() -> None:
+    apk_path = find_input_apk()
+    if apk_path is None:
+        INPUT_DIR.mkdir(parents=True, exist_ok=True)
+        print(f"No iiSU APK found in {INPUT_DIR}.")
+        print("Drop your own copy of the iiSU APK into that folder (any filename, .apk extension)")
+        print("and run this again. This tool patches your copy -- it doesn't come with one.")
+        sys.exit(1)
+    run_setup(apk_path)
+
+
+if __name__ == "__main__":
+    main()

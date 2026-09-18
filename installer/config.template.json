@@ -1,0 +1,57 @@
+{
+  "bridge_port": 7737,
+  "roms_dir": "C:/CHANGE-ME/Roms",
+  "search_roots": [
+    "C:/CHANGE-ME/Emulators",
+    "C:/Program Files",
+    "C:/Program Files (x86)"
+  ],
+  "iisu_window_title": "iisuwin",
+  "iisu_fullscreen": true,
+  "iisu_component": "com.iisulauncher/com.iisulauncher.launcher.StartupSafeModeActivity",
+  "avd_name": "iisuwin",
+  "display": {
+    "width": 1920,
+    "height": 1080,
+    "density": 240,
+    "refresh_rate": 144
+  },
+  "quit_hotkey": {
+    "modifiers": ["ctrl", "alt"],
+    "key": "q"
+  },
+  "shutdown_hotkey": {
+    "modifiers": ["ctrl", "alt"],
+    "key": "x"
+  },
+  "usb_passthrough": [],
+  "emulators": {
+    "org.dolphinemu": {
+      "exe_names": ["Dolphin.exe", "DolphinQt2.exe"],
+      "pre_args": ["-b"]
+    },
+    "com.github.stenzek.duckstation": {
+      "exe_names": ["duckstation-qt-x64-ReleaseLTCG.exe"],
+      "pre_args": ["-fullscreen"]
+    },
+    "info.cemu.cemu": {
+      "exe_names": ["Cemu.exe"],
+      "pre_args": ["-f"]
+    },
+    "org.citra.citra_emu": {
+      "exe_names": ["citra-qt.exe"],
+      "pre_args": ["-f"]
+    },
+    "org.azahar_emu.azahar": {
+      "exe_names": ["citra-qt.exe"],
+      "pre_args": ["-f"]
+    },
+    "org.ppsspp.ppsspp": {
+      "exe_names": ["PPSSPPWindows64.exe"],
+      "pre_args": ["--fullscreen"]
+    },
+    "com.retroarch": {
+      "by_extension": {}
+    }
+  }
+}
