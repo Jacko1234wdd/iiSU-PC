@@ -213,7 +213,7 @@ class SetupApp(tk.Tk):
 
     def _create_shortcut(self) -> None:
         try:
-            path = create_shortcut.create_desktop_shortcut()
+            path = create_shortcut.create_desktop_shortcut(self.apk_path)
         except Exception as e:
             messagebox.showerror("Couldn't create shortcut", str(e))
             return

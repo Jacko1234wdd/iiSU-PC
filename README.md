@@ -16,7 +16,7 @@ Runs iiSU (an Android emulation frontend) inside a Windows-hosted Android VM, pa
 
 ## First-time setup
 
-1. Drop your iiSU APK into `installer/input/` (any filename, `.apk` extension).
+1. Drop your iiSU APK into `installer/input/` (any filename, `.apk` extension) -- or just leave it wherever it already is and use the "Browse..." button once `Setup.bat` opens; either way works the whole way through, including the desktop shortcut's icon.
 2. Run `Setup.bat` (in this folder).
 
 This downloads and sets up a self-contained Android SDK and virtual device (nothing touches any existing Android Studio install), patches your APK, gets it installed, installs a redirector app for every console `shared/emulator_defaults.py` knows about, and creates a desktop shortcut that launches straight into iiSU. It can take a while and several GB on first run.

@@ -35,6 +35,8 @@ core is already installed there, same as RetroArch itself needs to be
 already installed for this to do anything.
 """
 
+from collections import Counter
+
 STANDALONE_DEFAULTS = [
     {
         "console": "psx",
@@ -229,3 +231,25 @@ def all_emulator_exe_names() -> list[tuple[str, list[str]]]:
         seen.setdefault(entry["app_label"], entry["exe_names"])
     seen.setdefault(RETROARCH_APP_LABEL, ["retroarch.exe"])
     return list(seen.items())
+
+
+def describe_profile(profile: dict) -> tuple[str, str]:
+    """Human-readable (executable name(s), launch flags) for one
+    config.json "emulators" map entry, for UIs that list these in a table.
+
+    A "by_extension" entry (RetroArch) has neither a flat exe_names nor
+    pre_args list -- it maps a different one of each per ROM extension --
+    so reading those keys directly gives an empty string on both columns,
+    which reads as "nothing configured" even though it's fully set up.
+    Showing every distinct exe_names value across all mapped extensions
+    would surface RETROARCH_SAFETY_NET_EXTENSIONS' DuckStation/Flycast
+    redirects too, which reads as a jumbled, unrelated list -- the single
+    most common executable across all mapped extensions is what a user
+    actually means by "what does this run," so that's what's shown; only
+    the flags genuinely vary per extension."""
+    if "by_extension" in profile:
+        by_ext = profile["by_extension"]
+        exe_counts = Counter(name for entry in by_ext.values() for name in entry.get("exe_names", []))
+        primary_exe = exe_counts.most_common(1)[0][0] if exe_counts else "?"
+        return primary_exe, f"(varies by file extension -- {len(by_ext)} mapped)"
+    return ", ".join(profile.get("exe_names", [])), ", ".join(profile.get("pre_args", []))

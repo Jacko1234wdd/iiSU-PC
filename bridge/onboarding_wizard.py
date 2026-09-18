@@ -34,7 +34,7 @@ from shared.theme import (
     BG, ENTRY_KWARGS, GRADIENT_STOPS, GREEN, LISTBOX_KWARGS, PANEL_BG, PANEL_BG_HOVER,
     RED, TEXT, TEXT_DIM, FONT_BODY, FONT_HEADING, FONT_MONO, FONT_TITLE, Card, QueueWriter, draw_gradient_bar,
 )
-from shared.emulator_defaults import all_emulator_exe_names
+from shared.emulator_defaults import all_emulator_exe_names, describe_profile
 
 RESOLUTION_PRESETS = ["1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160"]
 REFRESH_RATE_PRESETS = ["60", "90", "120", "144", "165", "240"]
@@ -445,10 +445,8 @@ class OnboardingWizard(tk.Tk):
         self.emulators_tree.pack(fill="both", expand=True)
 
         for prefix, profile in self.emulators.items():
-            self.emulators_tree.insert(
-                "", "end", iid=prefix,
-                values=(prefix, ", ".join(profile.get("exe_names", [])), ", ".join(profile.get("pre_args", []))),
-            )
+            exe_display, pre_args_display = describe_profile(profile)
+            self.emulators_tree.insert("", "end", iid=prefix, values=(prefix, exe_display, pre_args_display))
 
         btn_row = tk.Frame(self.content, bg=PANEL_BG)
         btn_row.pack(fill="x", pady=(8, 0))
@@ -472,6 +470,15 @@ class OnboardingWizard(tk.Tk):
         if not selected:
             return
         prefix = selected[0]
+        if "by_extension" in self.emulators.get(prefix, {}):
+            messagebox.showinfo(
+                "Can't edit here",
+                "This entry maps a different executable per ROM file extension "
+                "(see shared/emulator_defaults.py) -- editing it as one flat "
+                "executable/flags pair isn't supported here. Edit config.json "
+                "directly if you need to change it.",
+            )
+            return
         values = self.emulators_tree.item(prefix, "values")
         dialog = EmulatorDialog(self, "Edit emulator mapping", prefix=values[0], exe_names=values[1], pre_args=values[2])
         if dialog.result_values:
@@ -490,11 +497,13 @@ class OnboardingWizard(tk.Tk):
             prefix, exe_names_str, pre_args_str = self.emulators_tree.item(item, "values")
             # "by_extension" entries (RetroArch, which maps a different real
             # PC emulator per ROM extension rather than one fixed exe) show
-            # up as a blank row here since the tree only understands the
-            # plain exe_names/pre_args shape -- preserve the original entry
-            # instead of overwriting it with an empty one.
+            # a human-readable summary in these columns (see describe_profile),
+            # not the real underlying data -- always keep the original entry
+            # verbatim rather than reconstructing it from that summary text.
+            # The edit dialog already refuses to open on these, so the only
+            # way one of these rows changes at all is via Remove.
             original_entry = original.get(prefix, {})
-            if "by_extension" in original_entry and not exe_names_str.strip():
+            if "by_extension" in original_entry:
                 emulators[prefix] = original_entry
                 continue
             emulators[prefix] = {

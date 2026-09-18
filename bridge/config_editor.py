@@ -29,7 +29,7 @@ from console_names import load_console_lookup, resolve_console_shortname
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from shared import theme
 from shared.theme import BG, ENTRY_KWARGS, GRADIENT_STOPS, GREEN, LISTBOX_KWARGS, PANEL_BG, PANEL_BG_HOVER, RED, TEXT, TEXT_DIM, FONT_BODY, FONT_MONO, FONT_TITLE, QueueWriter, draw_gradient_bar
-from shared.emulator_defaults import all_stub_packages
+from shared.emulator_defaults import all_stub_packages, describe_profile
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "installer"))
 import stub_apk
@@ -343,12 +343,8 @@ class SetupApp(tk.Tk):
         self.emulators_tree.pack(fill="both", expand=True, padx=16, pady=4)
 
         for prefix, profile in self.config_data.get("emulators", {}).items():
-            self.emulators_tree.insert(
-                "",
-                "end",
-                iid=prefix,
-                values=(prefix, ", ".join(profile.get("exe_names", [])), ", ".join(profile.get("pre_args", []))),
-            )
+            exe_display, pre_args_display = describe_profile(profile)
+            self.emulators_tree.insert("", "end", iid=prefix, values=(prefix, exe_display, pre_args_display))
 
         btn_row = tk.Frame(frame, bg=PANEL_BG)
         btn_row.pack(fill="x", padx=16, pady=(0, 16))
@@ -378,6 +374,15 @@ class SetupApp(tk.Tk):
         if not selected:
             return
         prefix = selected[0]
+        if "by_extension" in self.config_data.get("emulators", {}).get(prefix, {}):
+            messagebox.showinfo(
+                "Can't edit here",
+                "This entry maps a different executable per ROM file extension "
+                "(see shared/emulator_defaults.py) -- editing it as one flat "
+                "executable/flags pair isn't supported here. Edit config.json "
+                "directly if you need to change it.",
+            )
+            return
         values = self.emulators_tree.item(prefix, "values")
         dialog = EmulatorDialog(
             self, "Edit emulator mapping", prefix=values[0], exe_names=values[1], pre_args=values[2]
@@ -625,11 +630,13 @@ class SetupApp(tk.Tk):
             prefix, exe_names_str, pre_args_str = self.emulators_tree.item(item, "values")
             # "by_extension" entries (e.g. com.retroarch, which maps to a
             # different real PC emulator per ROM extension rather than one
-            # fixed exe) show up as blank rows here since this tree only
-            # understands the plain exe_names/pre_args shape -- preserve the
-            # original entry instead of overwriting it with an empty one.
+            # fixed exe) show a human-readable summary in these columns (see
+            # describe_profile), not the real underlying data -- always keep
+            # the original entry verbatim rather than reconstructing it from
+            # that summary text. _edit_emulator() already refuses to open on
+            # these, so the only way one changes at all is via Remove.
             original = original_emulators.get(prefix, {})
-            if "by_extension" in original and not exe_names_str.strip():
+            if "by_extension" in original:
                 emulators[prefix] = original
                 continue
             emulators[prefix] = {

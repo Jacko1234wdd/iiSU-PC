@@ -247,15 +247,27 @@ def install_default_redirectors() -> None:
     real, differently-signed app installed under that name, which this
     deliberately does not overwrite -- see stub_apk.install_stub_apk)
     doesn't stop the rest, since none of them are required for the
-    install as a whole to have succeeded."""
+    install as a whole to have succeeded.
+
+    Missing build-tools is different: that fails every single stub, not
+    just one, and most consoles won't show up as playable in iiSU at all
+    without their stub -- so this fails setup loudly instead of quietly
+    finishing with zero consoles usable and no obvious sign why (confirmed
+    live: a silent skip here is easy to miss in a long setup log)."""
     sys.path.insert(0, str(PROJECT_ROOT))
     import stub_apk
     from shared.emulator_defaults import all_stub_packages
 
     stub_apk.preserve_build_tools(sdk_bootstrap.SDK_ROOT)
     if not stub_apk.build_tools_available():
-        print("[setup] build-tools not available -- skipping default redirector apps")
-        return
+        expected_source = sdk_bootstrap.SDK_ROOT / "build-tools" / sdk_bootstrap.BUILD_TOOLS_VERSION
+        raise RuntimeError(
+            f"build-tools not found under {stub_apk.BUILD_TOOLS_DIR} (tried to copy them from "
+            f"{expected_source}, which {'exists' if expected_source.is_dir() else 'does not exist'}) -- "
+            "redirector apps can't be built without them, and most consoles won't appear as playable "
+            "in iiSU without their stub. Re-run Setup.bat; if this keeps happening, check that the SDK "
+            "download actually included build-tools."
+        )
 
     print("[setup] installing default redirector apps (so iiSU recognizes each console's emulator)...")
     for package, label in all_stub_packages():
@@ -269,14 +281,21 @@ def install_default_redirectors() -> None:
             print(f"[setup]   {label}: failed ({e})")
 
 
-def create_desktop_shortcut() -> None:
+def create_desktop_shortcut(apk_path: Path) -> None:
     """A shortcut straight to iiSU is worth having by default -- not
     something worth failing setup over if it doesn't work, so any problem
-    here is reported and swallowed rather than raised."""
+    here is reported and swallowed rather than raised.
+
+    Passes the actual source APK through explicitly rather than letting
+    create_shortcut.py re-discover one under installer/input/ -- picking
+    an APK from anywhere else via Browse (setup_gui.py) works fine for
+    patching, which only ever reads from wherever apk_path points, but
+    icon extraction used to silently fall back to the generic icon
+    whenever that wasn't also a copy sitting in installer/input/."""
     sys.path.insert(0, str(BRIDGE_DIR))
     import create_shortcut
     try:
-        shortcut_path = create_shortcut.create_desktop_shortcut()
+        shortcut_path = create_shortcut.create_desktop_shortcut(apk_path)
         print(f"[setup] created a desktop shortcut: {shortcut_path}")
     except Exception as e:
         print(f"[setup] couldn't create a desktop shortcut ({e}) -- you can still use iiSU-PC.bat directly")
@@ -326,7 +345,7 @@ def run_setup(apk_path: Path) -> None:
 
     write_bridge_config(DEFAULT_AVD_NAME)
     cleanup_installer_sdk()
-    create_desktop_shortcut()
+    create_desktop_shortcut(apk_path)
 
     print("\n=== Setup complete ===")
     print(f"iiSU is installed and the bridge is configured for AVD '{DEFAULT_AVD_NAME}'.")

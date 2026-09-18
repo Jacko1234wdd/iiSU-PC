@@ -61,13 +61,20 @@ def _find_raster_icon(decompiled_dir: Path, icon_type: str, icon_name: str) -> P
     return None
 
 
-def extract_iisu_icon() -> Path | None:
+def extract_iisu_icon(apk_path: Path | None = None) -> Path | None:
     """Best-effort: pulls iiSU's own launcher icon out of the APK you
     supplied, purely so the desktop shortcut can show the real icon
     instead of a generic one. Runs apktool's resource decoder (already
     bundled for patch_iisu.py) against your own copy, reads the icon file
     it resolves, and converts it locally -- nothing here is ever committed
     to this project or sent anywhere.
+
+    apk_path lets a caller that already knows exactly which APK it used
+    (e.g. one picked via a file browser, living anywhere on disk) pass it
+    straight through -- falling back to scanning installer/input/ only
+    when the caller doesn't know (e.g. this module run standalone) is what
+    silently produced the generic icon for anyone who picked their APK
+    from somewhere else instead of dropping a copy in that folder.
 
     This is a cosmetic nice-to-have, not something worth failing shortcut
     creation over: needs Pillow (not a hard dependency of the rest of this
@@ -80,8 +87,9 @@ def extract_iisu_icon() -> Path | None:
         print("[shortcut] Pillow isn't installed -- using the generic icon (pip install pillow to use iiSU's own)")
         return None
 
-    apk_path = _find_input_apk()
     if apk_path is None:
+        apk_path = _find_input_apk()
+    if apk_path is None or not apk_path.is_file():
         print(f"[shortcut] no APK found under {INPUT_DIR} -- using the generic icon")
         return None
 
@@ -145,8 +153,8 @@ def _refresh_shell_icon_cache() -> None:
     ctypes.windll.shell32.SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None)
 
 
-def create_desktop_shortcut() -> Path:
-    extracted = extract_iisu_icon()
+def create_desktop_shortcut(apk_path: Path | None = None) -> Path:
+    extracted = extract_iisu_icon(apk_path)
     icon_path = extracted or FALLBACK_ICON_PATH
     if extracted is None:
         # extract_iisu_icon() already printed exactly why (missing Pillow,
