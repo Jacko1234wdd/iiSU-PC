@@ -81,7 +81,12 @@ STANDALONE_DEFAULTS = [
         "console_label": "Nintendo 3DS (Azahar)",
         "package": "org.azahar_emu.azahar",
         "app_label": "Azahar",
-        "exe_names": ["citra-qt.exe"],
+        # Azahar Plus (a further fork of Azahar) renamed its binary to
+        # azahar.exe -- mainline Azahar builds still ship as citra-qt.exe,
+        # inherited from Azahar's own Citra ancestry. Both are searched for
+        # under this one slot since they're the same PC-side choice from
+        # iiSU's perspective, just two forks' different binary names.
+        "exe_names": ["citra-qt.exe", "azahar.exe"],
         "pre_args": ["-f"],
     },
     {

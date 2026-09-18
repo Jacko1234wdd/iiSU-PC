@@ -24,6 +24,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import winapi
 from bridge_config import CONFIG_PATH, ConfigMissingError, load_config
+from config_editor import EmulatorDialog
 from console_names import load_console_lookup, resolve_console_shortname
 from launch_bridge import find_executable
 
@@ -39,7 +40,7 @@ RESOLUTION_PRESETS = ["1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", 
 REFRESH_RATE_PRESETS = ["60", "90", "120", "144", "165", "240"]
 MODIFIER_NAMES = ["ctrl", "alt", "shift", "win"]
 
-STEP_TITLES = ["Welcome", "ROM Directory", "Emulator Folders", "Display", "Hotkeys", "Finish"]
+STEP_TITLES = ["Welcome", "ROM Directory", "Emulator Folders", "Emulator Mappings", "Display", "Hotkeys", "Finish"]
 
 
 def save_config(config: dict) -> None:
@@ -114,6 +115,7 @@ class OnboardingWizard(tk.Tk):
         self.roms_dir_var = tk.StringVar(value="" if "CHANGE-ME" in roms_dir else roms_dir)
 
         self.search_roots = [r for r in self.config_data.get("search_roots", []) if "CHANGE-ME" not in r]
+        self.emulators = dict(self.config_data.get("emulators", {}))
 
         display = self.config_data.get("display", {"width": 1920, "height": 1080, "density": 240, "refresh_rate": 60})
         self.display_width_var = tk.StringVar(value=str(display.get("width", 1920)))
@@ -177,9 +179,10 @@ class OnboardingWizard(tk.Tk):
             0: self._build_welcome,
             1: self._build_roms,
             2: self._build_emulator_folders,
-            3: self._build_display,
-            4: self._build_hotkeys,
-            5: self._build_finish,
+            3: self._build_emulator_mappings,
+            4: self._build_display,
+            5: self._build_hotkeys,
+            6: self._build_finish,
         }
 
     def _validators(self) -> dict:
@@ -188,11 +191,13 @@ class OnboardingWizard(tk.Tk):
     def _capture_current_step(self) -> None:
         """Copies live widget state for whatever step is on screen back
         into the persistent fields that survive rebuilding self.content --
-        only the search-folders Listbox needs this (every other step's
-        widgets are bound directly to tk Variables created once in
-        _init_state, which survive on their own)."""
+        only the search-folders Listbox and the emulator-mappings Treeview
+        need this (every other step's widgets are bound directly to tk
+        Variables created once in _init_state, which survive on their own)."""
         if self.step_index == 2 and getattr(self, "search_roots_list", None) is not None:
             self.search_roots = list(self.search_roots_list.get(0, "end"))
+        elif self.step_index == 3 and getattr(self, "emulators_tree", None) is not None:
+            self._capture_emulator_mappings()
 
     def _show_step(self, index: int) -> None:
         self.step_index = index
@@ -407,7 +412,89 @@ class OnboardingWizard(tk.Tk):
             lines.append(f"Not found yet: {', '.join(missing_labels)} -- install any of these and iiSU-PC will pick them up automatically.")
         self.scan_status_label.config(text="\n".join(lines), fg=GREEN if found_labels else TEXT_DIM)
 
-    # -- Step 3: Display -------------------------------------------------
+    # -- Step 3: Emulator mappings -------------------------------------------------
+
+    def _build_emulator_mappings(self) -> None:
+        tk.Label(self.content, text="Emulator mappings", font=FONT_HEADING, bg=PANEL_BG, fg=TEXT).pack(anchor="w")
+        tk.Label(
+            self.content,
+            text="Maps each console's Android package to the real PC emulator that runs\n"
+            "it. The defaults above already cover most installs -- edit here only if\n"
+            "you're using an unusual fork with a different executable name (e.g. a\n"
+            "build of Azahar that ships as azahar.exe instead of citra-qt.exe).",
+            font=FONT_BODY, bg=PANEL_BG, fg=TEXT_DIM, justify="left",
+        ).pack(anchor="w", pady=(4, 12))
+
+        columns = ("prefix", "exe_names", "pre_args")
+        self.emulators_tree = ttk.Treeview(self.content, columns=columns, show="headings", height=9)
+        self.emulators_tree.heading("prefix", text="Package prefix")
+        self.emulators_tree.heading("exe_names", text="Executable name(s)")
+        self.emulators_tree.heading("pre_args", text="Launch flags")
+        self.emulators_tree.column("prefix", width=230)
+        self.emulators_tree.column("exe_names", width=210)
+        self.emulators_tree.column("pre_args", width=140)
+        self.emulators_tree.pack(fill="both", expand=True)
+
+        for prefix, profile in self.emulators.items():
+            self.emulators_tree.insert(
+                "", "end", iid=prefix,
+                values=(prefix, ", ".join(profile.get("exe_names", [])), ", ".join(profile.get("pre_args", []))),
+            )
+
+        btn_row = tk.Frame(self.content, bg=PANEL_BG)
+        btn_row.pack(fill="x", pady=(8, 0))
+        ttk.Button(btn_row, text="Add...", style="Ghost.TButton", command=self._add_emulator_mapping).pack(side="left")
+        ttk.Button(btn_row, text="Edit selected...", style="Ghost.TButton", command=self._edit_emulator_mapping).pack(side="left", padx=(8, 0))
+        ttk.Button(btn_row, text="Remove selected", style="Ghost.TButton", command=self._remove_emulator_mapping).pack(side="left", padx=(8, 0))
+
+    def _add_emulator_mapping(self) -> None:
+        dialog = EmulatorDialog(self, "Add emulator mapping")
+        if dialog.result_values:
+            prefix, exe_names, pre_args = dialog.result_values
+            if not prefix:
+                return
+            if self.emulators_tree.exists(prefix):
+                messagebox.showerror("Duplicate", f"A mapping for '{prefix}' already exists.")
+                return
+            self.emulators_tree.insert("", "end", iid=prefix, values=(prefix, ", ".join(exe_names), ", ".join(pre_args)))
+
+    def _edit_emulator_mapping(self) -> None:
+        selected = self.emulators_tree.selection()
+        if not selected:
+            return
+        prefix = selected[0]
+        values = self.emulators_tree.item(prefix, "values")
+        dialog = EmulatorDialog(self, "Edit emulator mapping", prefix=values[0], exe_names=values[1], pre_args=values[2])
+        if dialog.result_values:
+            new_prefix, exe_names, pre_args = dialog.result_values
+            self.emulators_tree.delete(prefix)
+            self.emulators_tree.insert("", "end", iid=new_prefix, values=(new_prefix, ", ".join(exe_names), ", ".join(pre_args)))
+
+    def _remove_emulator_mapping(self) -> None:
+        for item in self.emulators_tree.selection():
+            self.emulators_tree.delete(item)
+
+    def _capture_emulator_mappings(self) -> None:
+        original = self.emulators
+        emulators = {}
+        for item in self.emulators_tree.get_children():
+            prefix, exe_names_str, pre_args_str = self.emulators_tree.item(item, "values")
+            # "by_extension" entries (RetroArch, which maps a different real
+            # PC emulator per ROM extension rather than one fixed exe) show
+            # up as a blank row here since the tree only understands the
+            # plain exe_names/pre_args shape -- preserve the original entry
+            # instead of overwriting it with an empty one.
+            original_entry = original.get(prefix, {})
+            if "by_extension" in original_entry and not exe_names_str.strip():
+                emulators[prefix] = original_entry
+                continue
+            emulators[prefix] = {
+                "exe_names": [s.strip() for s in exe_names_str.split(",") if s.strip()],
+                "pre_args": [s.strip() for s in pre_args_str.split(",") if s.strip()],
+            }
+        self.emulators = emulators
+
+    # -- Step 4: Display -------------------------------------------------
 
     def _build_display(self) -> None:
         tk.Label(self.content, text="What resolution should the VM run at?", font=FONT_HEADING, bg=PANEL_BG, fg=TEXT).pack(anchor="w")
@@ -513,7 +600,7 @@ class OnboardingWizard(tk.Tk):
         canvas.create_rectangle(x0, y0, x0 + rect_w, y0 + rect_h, fill=PANEL_BG_HOVER, outline=GRADIENT_STOPS[2], width=2)
         canvas.create_text(box_w / 2, box_h / 2, text=f"{width}×{height}", fill=TEXT, font=FONT_BODY)
 
-    # -- Step 4: Hotkeys -------------------------------------------------
+    # -- Step 5: Hotkeys -------------------------------------------------
 
     def _build_hotkeys(self) -> None:
         tk.Label(self.content, text="Hotkeys", font=FONT_HEADING, bg=PANEL_BG, fg=TEXT).pack(anchor="w")
@@ -572,7 +659,7 @@ class OnboardingWizard(tk.Tk):
             "key": key_var.get().strip() or default_key,
         }
 
-    # -- Step 5: Finish -------------------------------------------------
+    # -- Step 6: Finish -------------------------------------------------
 
     def _build_finish(self) -> None:
         tk.Label(self.content, text="Ready to go", font=FONT_HEADING, bg=PANEL_BG, fg=TEXT).pack(anchor="w")
@@ -597,6 +684,7 @@ class OnboardingWizard(tk.Tk):
             f"ROM folder: {self.roms_dir_var.get().strip() or '(not set)'}",
             f"Emulator search folders: {len(self.search_roots)}"
             + (f" ({sum(1 for _, ok in self.scan_results if ok)} emulators found)" if self.scan_results is not None else ""),
+            f"Emulator mappings: {len(self.emulators)} configured",
             f"Display: {self.display_width_var.get()}×{self.display_height_var.get()} @ {self.display_refresh_var.get()}Hz{display_note}",
             f"Quit hotkey: {self._describe_hotkey(self.quit_mod_vars, self.quit_key_var)}",
             f"Shutdown hotkey: {self._describe_hotkey(self.shutdown_mod_vars, self.shutdown_key_var)}",
@@ -628,6 +716,7 @@ class OnboardingWizard(tk.Tk):
         config = dict(self.config_data)
         config["roms_dir"] = self.roms_dir_var.get().strip()
         config["search_roots"] = self.search_roots
+        config["emulators"] = self.emulators
         config["display"] = display
         config["iisu_fullscreen"] = self.iisu_fullscreen_var.get()
         config["quit_hotkey"] = self._read_hotkey(self.quit_mod_vars, self.quit_key_var, default_key="q")
