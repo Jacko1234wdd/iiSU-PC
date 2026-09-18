@@ -29,6 +29,17 @@ FONT_HEADING = ("Segoe UI Semibold", 11)
 FONT_BODY = ("Segoe UI", 10)
 FONT_MONO = ("Consolas", 9)
 
+# Classic (non-ttk) widgets like Entry and Listbox aren't reachable through
+# ttk.Style, so their dark styling is a plain kwargs dict to unpack instead.
+ENTRY_KWARGS = dict(
+    bg="#0e0e10", fg=TEXT, insertbackground=TEXT, relief="flat",
+    highlightthickness=1, highlightbackground=PANEL_BG_HOVER, highlightcolor=GRADIENT_STOPS[2],
+)
+LISTBOX_KWARGS = dict(
+    bg="#0e0e10", fg=TEXT, selectbackground=GRADIENT_STOPS[2], selectforeground=TEXT,
+    relief="flat", highlightthickness=1, highlightbackground=PANEL_BG_HOVER,
+)
+
 
 class QueueWriter:
     """A writable stream that pushes text into a queue instead of a real
@@ -76,13 +87,24 @@ class Card(tk.Frame):
 
 
 def apply_ttk_styles(style: ttk.Style) -> None:
-    """Configures the ttk styles both front ends build their buttons and
-    progress bar from (Accent.TButton, Ghost.TButton,
-    Dark.Horizontal.TProgressbar), so a style tweak only has to happen in
-    one place."""
+    """Configures the ttk styles the front ends build their widgets from
+    (buttons, progress bar, notebook tabs, treeview, checkbutton, plain
+    frames), so a style tweak only has to happen in one place."""
     style.theme_use("clam")
     style.configure("Accent.TButton", background="#3a3a40", foreground=TEXT, font=FONT_HEADING, padding=(16, 10), borderwidth=0)
     style.map("Accent.TButton", background=[("active", "#48484f"), ("disabled", "#2a2a2e")], foreground=[("disabled", TEXT_DIM)])
     style.configure("Ghost.TButton", background=PANEL_BG, foreground=TEXT, font=FONT_BODY, padding=(12, 6), borderwidth=0)
     style.map("Ghost.TButton", background=[("active", PANEL_BG_HOVER)])
     style.configure("Dark.Horizontal.TProgressbar", background=GRADIENT_STOPS[2], troughcolor=PANEL_BG, borderwidth=0)
+
+    style.configure("TNotebook", background=BG, borderwidth=0, tabmargins=(0, 4, 0, 0))
+    style.configure("TNotebook.Tab", background=BG, foreground=TEXT_DIM, font=FONT_BODY, padding=(14, 8), borderwidth=0)
+    style.map("TNotebook.Tab", background=[("selected", PANEL_BG)], foreground=[("selected", TEXT)])
+
+    style.configure("Treeview", background="#0e0e10", fieldbackground="#0e0e10", foreground=TEXT, font=FONT_BODY, borderwidth=0, rowheight=26)
+    style.configure("Treeview.Heading", background=PANEL_BG, foreground=TEXT_DIM, font=FONT_HEADING, borderwidth=0)
+    style.map("Treeview", background=[("selected", GRADIENT_STOPS[2])], foreground=[("selected", "#101010")])
+    style.map("Treeview.Heading", background=[("active", PANEL_BG_HOVER)])
+
+    style.configure("TCheckbutton", background=PANEL_BG, foreground=TEXT, font=FONT_BODY)
+    style.map("TCheckbutton", background=[("active", PANEL_BG)], foreground=[("disabled", TEXT_DIM)])
