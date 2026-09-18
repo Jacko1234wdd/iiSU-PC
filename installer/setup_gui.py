@@ -28,6 +28,8 @@ from shared import theme
 from shared.theme import BG, GREEN, PANEL_BG, RED, TEXT, TEXT_DIM, FONT_BODY, FONT_HEADING, FONT_MONO, FONT_TITLE, Card, QueueWriter, draw_gradient_bar
 
 BRIDGE_DIR = setup_wizard.BRIDGE_DIR
+sys.path.insert(0, str(BRIDGE_DIR))
+import create_shortcut
 
 
 class SetupApp(tk.Tk):
@@ -186,6 +188,18 @@ class SetupApp(tk.Tk):
             self.next_steps_frame, text="Open iiSU-PC", style="Accent.TButton",
             command=lambda: self._launch_bridge_script("control_panel.py", detached=True),
         ).pack(side="left")
+        ttk.Button(
+            self.next_steps_frame, text="Create Desktop Shortcut", style="Ghost.TButton",
+            command=self._create_shortcut,
+        ).pack(side="left", padx=(10, 0))
+
+    def _create_shortcut(self) -> None:
+        try:
+            path = create_shortcut.create_desktop_shortcut()
+        except Exception as e:
+            messagebox.showerror("Couldn't create shortcut", str(e))
+            return
+        messagebox.showinfo("Shortcut created", f"Created {path.name} on your desktop.")
 
     def _launch_bridge_script(self, script_name: str, detached: bool) -> None:
         subprocess.Popen(

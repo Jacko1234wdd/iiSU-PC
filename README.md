@@ -12,6 +12,7 @@ Runs iiSU (an Android emulation frontend) inside a Windows-hosted Android VM, pa
 - Your own copy of the iiSU APK
 - Whichever PC emulators you actually want to use (DuckStation, Dolphin, PCSX2, etc.) — install these yourself; this tool doesn't bundle them either
 - A few GB of free disk space and a decent internet connection (first run downloads the Android SDK + a system image)
+- Optional: [Pillow](https://pypi.org/project/pillow/) (`pip install pillow`) if you want the "Desktop Shortcut" button to use iiSU's own icon (extracted from your APK) instead of a generic one
 
 ## First-time setup
 

@@ -12,12 +12,13 @@ import threading
 import traceback
 import tkinter as tk
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from shared import theme
 from shared.theme import BG, GRAY, GREEN, PANEL_BG, RED, TEXT, TEXT_DIM, FONT_BODY, FONT_HEADING, FONT_MONO, FONT_TITLE, GRADIENT_STOPS, Card, QueueWriter, draw_gradient_bar
 
+import create_shortcut
 import start_iisu_pc
 import stop_iisu_pc
 
@@ -99,6 +100,7 @@ class ControlPanel(tk.Tk):
         self.stop_button = ttk.Button(button_row, text="Stop", style="Accent.TButton", command=self._stop)
         self.stop_button.pack(side="left", padx=(10, 0))
         ttk.Button(button_row, text="Configure...", style="Ghost.TButton", command=self._open_configure).pack(side="left", padx=(10, 0))
+        ttk.Button(button_row, text="Desktop Shortcut", style="Ghost.TButton", command=self._create_shortcut).pack(side="left", padx=(10, 0))
 
         self.progress = ttk.Progressbar(button_row, mode="indeterminate", style="Dark.Horizontal.TProgressbar")
         self.progress.pack(side="left", fill="x", expand=True, padx=(16, 0))
@@ -203,6 +205,14 @@ class ControlPanel(tk.Tk):
 
     def _open_configure(self) -> None:
         subprocess.Popen([sys.executable, "config_editor.py"], cwd=str(SCRIPT_DIR))
+
+    def _create_shortcut(self) -> None:
+        try:
+            path = create_shortcut.create_desktop_shortcut()
+        except Exception as e:
+            messagebox.showerror("Couldn't create shortcut", str(e))
+            return
+        messagebox.showinfo("Shortcut created", f"Created {path.name} on your desktop.")
 
 
 if __name__ == "__main__":
