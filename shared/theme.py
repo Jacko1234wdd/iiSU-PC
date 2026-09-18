@@ -108,3 +108,14 @@ def apply_ttk_styles(style: ttk.Style) -> None:
 
     style.configure("TCheckbutton", background=PANEL_BG, foreground=TEXT, font=FONT_BODY)
     style.map("TCheckbutton", background=[("active", PANEL_BG)], foreground=[("disabled", TEXT_DIM)])
+
+    # The dropdown popup list itself is native-rendered and outside ttk's
+    # reach on Windows, but this at least keeps the field itself dark.
+    style.configure("TCombobox", fieldbackground="#0e0e10", background=PANEL_BG, foreground=TEXT, arrowcolor=TEXT, borderwidth=0, padding=4)
+    style.map(
+        "TCombobox",
+        fieldbackground=[("readonly", "#0e0e10")],
+        foreground=[("readonly", TEXT)],
+        selectbackground=[("readonly", "#0e0e10")],
+        selectforeground=[("readonly", TEXT)],
+    )

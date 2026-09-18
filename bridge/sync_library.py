@@ -25,59 +25,19 @@ Run this after adding/removing games in your real library, then hit
 """
 
 import json
-import re
 import shlex
 import subprocess
 import sys
 from pathlib import Path
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
-CONSOLE_NAMES_PATH = Path(__file__).parent / "console_names.json"
+from console_names import load_console_lookup, resolve_console_shortname
 
-# Manual overrides for this library's actual NAS folder names, which don't
-# line up 1:1 with iiSU's shortName/longName/alternativeNames (e.g. iiSU
-# expects "Sony PlayStation 2", the NAS folder is just "Playstation 2").
-# Extend this if you add a console folder that doesn't auto-match.
-NAS_NAME_OVERRIDES = {
-    "playstation 1": "psx",
-    "playstation 2": "ps2",
-    "playstation 3": "ps3",
-    "playstation portable": "psp",
-    "sega megadrive (genesis)": "genesis",
-}
+CONFIG_PATH = Path(__file__).parent / "config.json"
 
 AVD_ROMS_ROOT = "/sdcard/Roms"
 PLACEHOLDER_SIZE_KB = 4
 
 IGNORE_TOP_LEVEL = {"folder.ico", "sync.ffs_lock"}
-
-
-def compact(name: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", name.lower())
-
-
-def load_console_lookup() -> dict:
-    with open(CONSOLE_NAMES_PATH, encoding="utf-8") as f:
-        exact = json.load(f)
-    by_compact = {compact(k): v for k, v in exact.items()}
-    return exact, by_compact
-
-
-def resolve_console_shortname(folder_name: str, exact: dict, by_compact: dict) -> str | None:
-    lower = folder_name.lower()
-    if lower in NAS_NAME_OVERRIDES:
-        return NAS_NAME_OVERRIDES[lower]
-    if lower in exact:
-        return exact[lower]
-    c = compact(folder_name)
-    if c in by_compact:
-        return by_compact[c]
-    # Fallback: substring match against longer (>=5 char) known names only,
-    # to avoid short codes like "gc" false-positive matching inside names.
-    for key, short in by_compact.items():
-        if len(key) >= 5 and (key in c or c in key):
-            return short
-    return None
 
 
 def adb(*args: str, check: bool = True) -> subprocess.CompletedProcess:

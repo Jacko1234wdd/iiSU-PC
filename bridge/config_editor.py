@@ -22,10 +22,15 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import winapi
 from bridge_config import CONFIG_PATH, ConfigMissingError, load_config
+from console_names import load_console_lookup, resolve_console_shortname
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from shared import theme
-from shared.theme import BG, ENTRY_KWARGS, GRADIENT_STOPS, GREEN, LISTBOX_KWARGS, PANEL_BG, TEXT, TEXT_DIM, FONT_BODY, FONT_TITLE, draw_gradient_bar
+from shared.theme import BG, ENTRY_KWARGS, GRADIENT_STOPS, GREEN, LISTBOX_KWARGS, PANEL_BG, PANEL_BG_HOVER, RED, TEXT, TEXT_DIM, FONT_BODY, FONT_TITLE, draw_gradient_bar
+
+RESOLUTION_PRESETS = ["1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160"]
+REFRESH_RATE_PRESETS = ["60", "90", "120", "144", "165", "240"]
+MODIFIER_NAMES = ["ctrl", "alt", "shift", "win"]
 
 
 def save_config(config: dict) -> None:
@@ -90,8 +95,8 @@ class SetupApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("iiSU-PC Configure")
-        self.geometry("700x640")
-        self.minsize(620, 520)
+        self.geometry("760x760")
+        self.minsize(680, 640)
         self.configure(bg=BG)
 
         try:
@@ -153,16 +158,16 @@ class SetupApp(tk.Tk):
         row = tk.Frame(frame, bg=PANEL_BG)
         row.pack(fill="x", padx=16, pady=4)
         self.roms_dir_var = tk.StringVar(value=self.config_data.get("roms_dir", ""))
-        tk.Entry(row, textvariable=self.roms_dir_var, **ENTRY_KWARGS).pack(side="left", fill="x", expand=True, ipady=3)
+        roms_entry = tk.Entry(row, textvariable=self.roms_dir_var, **ENTRY_KWARGS)
+        roms_entry.pack(side="left", fill="x", expand=True, ipady=3)
+        roms_entry.bind("<FocusOut>", lambda e: self._refresh_roms_status())
         ttk.Button(row, text="Browse...", style="Ghost.TButton", command=self._browse_roms_dir).pack(side="left", padx=(8, 0))
 
-        tk.Label(
-            frame,
-            text="Each subfolder's name must match one of iiSU's known console\n"
-            "short/long names (e.g. \"psx\", \"n64\") or iiSU will reject it.",
-            bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY,
-            justify="left",
-        ).pack(anchor="w", padx=16, pady=(6, 0))
+        # Live feedback on whether iiSU will actually recognize what's in
+        # there, instead of only finding out after saving and rescanning.
+        self.roms_status_label = tk.Label(frame, text="", bg=PANEL_BG, font=FONT_BODY, justify="left", wraplength=620, anchor="w")
+        self.roms_status_label.pack(anchor="w", fill="x", padx=16, pady=(6, 0))
+        self._refresh_roms_status()
 
         tk.Label(frame, text="Folders to search for emulator executables:", bg=PANEL_BG, fg=TEXT, font=FONT_BODY).pack(
             anchor="w", padx=16, pady=(16, 0)
@@ -179,10 +184,41 @@ class SetupApp(tk.Tk):
             side="left", padx=(8, 0)
         )
 
+    def _refresh_roms_status(self) -> None:
+        raw = self.roms_dir_var.get().strip()
+        if not raw:
+            self.roms_status_label.config(text="", fg=TEXT_DIM)
+            return
+        path = Path(raw)
+        if not path.is_dir():
+            self.roms_status_label.config(text="✗ This folder doesn't exist yet.", fg=RED)
+            return
+
+        exact, by_compact = load_console_lookup()
+        recognized, unrecognized = [], []
+        for child in sorted(path.iterdir()):
+            if not child.is_dir():
+                continue
+            (recognized if resolve_console_shortname(child.name, exact, by_compact) else unrecognized).append(child.name)
+
+        if not recognized and not unrecognized:
+            self.roms_status_label.config(text="This folder is empty.", fg=TEXT_DIM)
+        elif not unrecognized:
+            self.roms_status_label.config(
+                text=f"✓ iiSU will recognize all {len(recognized)} folder(s): {', '.join(recognized)}", fg=GREEN
+            )
+        else:
+            prefix = f"✓ {len(recognized)} recognized, " if recognized else ""
+            self.roms_status_label.config(
+                text=f"{prefix}✗ {len(unrecognized)} won't be seen by iiSU (rename these): {', '.join(unrecognized)}",
+                fg=RED,
+            )
+
     def _browse_roms_dir(self):
         path = filedialog.askdirectory(title="Select root ROM folder")
         if path:
             self.roms_dir_var.set(path)
+            self._refresh_roms_status()
 
     def _add_search_root(self):
         path = filedialog.askdirectory(title="Select a folder to search for emulators")
@@ -264,6 +300,7 @@ class SetupApp(tk.Tk):
 
     def _build_display_tab(self):
         frame = self.display_tab
+        frame.grid_columnconfigure(0, weight=1)
 
         tk.Label(
             frame,
@@ -278,30 +315,55 @@ class SetupApp(tk.Tk):
         display = self.config_data.get(
             "display", {"width": 1920, "height": 1080, "density": 240, "refresh_rate": 60}
         )
-
-        tk.Label(frame, text="Width (px):", bg=PANEL_BG, fg=TEXT, font=FONT_BODY).grid(row=1, column=0, sticky="w", padx=16)
         self.display_width_var = tk.StringVar(value=str(display.get("width", 1920)))
-        tk.Entry(frame, textvariable=self.display_width_var, width=10, **ENTRY_KWARGS).grid(
-            row=1, column=1, sticky="w", padx=8, pady=3
-        )
-
-        tk.Label(frame, text="Height (px):", bg=PANEL_BG, fg=TEXT, font=FONT_BODY).grid(row=2, column=0, sticky="w", padx=16)
         self.display_height_var = tk.StringVar(value=str(display.get("height", 1080)))
-        tk.Entry(frame, textvariable=self.display_height_var, width=10, **ENTRY_KWARGS).grid(
-            row=2, column=1, sticky="w", padx=8, pady=3
-        )
-
-        tk.Label(frame, text="Density (dpi):", bg=PANEL_BG, fg=TEXT, font=FONT_BODY).grid(row=3, column=0, sticky="w", padx=16)
         self.display_density_var = tk.StringVar(value=str(display.get("density", 240)))
-        tk.Entry(frame, textvariable=self.display_density_var, width=10, **ENTRY_KWARGS).grid(
-            row=3, column=1, sticky="w", padx=8, pady=3
+        self.display_refresh_var = tk.StringVar(value=str(display.get("refresh_rate", 60)))
+
+        settings_col = tk.Frame(frame, bg=PANEL_BG)
+        settings_col.grid(row=1, column=0, sticky="nw", padx=16)
+
+        tk.Label(settings_col, text="Resolution:", bg=PANEL_BG, fg=TEXT, font=FONT_BODY).grid(row=0, column=0, sticky="w")
+        self.resolution_preset_var = tk.StringVar()
+        resolution_combo = ttk.Combobox(
+            settings_col, textvariable=self.resolution_preset_var, values=RESOLUTION_PRESETS,
+            state="readonly", width=14, font=FONT_BODY,
+        )
+        resolution_combo.grid(row=0, column=1, sticky="w", padx=(8, 4), pady=3)
+        resolution_combo.bind("<<ComboboxSelected>>", self._apply_resolution_preset)
+
+        tk.Label(settings_col, text="or exactly:", bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY).grid(row=1, column=0, sticky="w", pady=3)
+        exact_row = tk.Frame(settings_col, bg=PANEL_BG)
+        exact_row.grid(row=1, column=1, sticky="w", padx=(8, 0))
+        width_entry = tk.Entry(exact_row, textvariable=self.display_width_var, width=6, **ENTRY_KWARGS)
+        width_entry.pack(side="left")
+        tk.Label(exact_row, text="x", bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY).pack(side="left", padx=4)
+        height_entry = tk.Entry(exact_row, textvariable=self.display_height_var, width=6, **ENTRY_KWARGS)
+        height_entry.pack(side="left")
+
+        tk.Label(settings_col, text="Density (dpi):", bg=PANEL_BG, fg=TEXT, font=FONT_BODY).grid(row=2, column=0, sticky="w", pady=3)
+        tk.Entry(settings_col, textvariable=self.display_density_var, width=8, **ENTRY_KWARGS).grid(
+            row=2, column=1, sticky="w", padx=(8, 0), pady=3
         )
 
-        tk.Label(frame, text="Refresh rate (Hz):", bg=PANEL_BG, fg=TEXT, font=FONT_BODY).grid(row=4, column=0, sticky="w", padx=16)
-        self.display_refresh_var = tk.StringVar(value=str(display.get("refresh_rate", 60)))
-        tk.Entry(frame, textvariable=self.display_refresh_var, width=10, **ENTRY_KWARGS).grid(
-            row=4, column=1, sticky="w", padx=8, pady=3
-        )
+        tk.Label(settings_col, text="Refresh rate (Hz):", bg=PANEL_BG, fg=TEXT, font=FONT_BODY).grid(row=3, column=0, sticky="w", pady=3)
+        refresh_row = tk.Frame(settings_col, bg=PANEL_BG)
+        refresh_row.grid(row=3, column=1, sticky="w", padx=(8, 0))
+        tk.Entry(refresh_row, textvariable=self.display_refresh_var, width=6, **ENTRY_KWARGS).pack(side="left")
+        refresh_combo = ttk.Combobox(refresh_row, values=REFRESH_RATE_PRESETS, state="readonly", width=5, font=FONT_BODY)
+        refresh_combo.pack(side="left", padx=(6, 0))
+        refresh_combo.bind("<<ComboboxSelected>>", lambda e: self.display_refresh_var.set(refresh_combo.get()))
+
+        # A live preview beats squinting at four numbers to picture the shape.
+        preview_col = tk.Frame(frame, bg=PANEL_BG)
+        preview_col.grid(row=1, column=1, sticky="ne", padx=16)
+        tk.Label(preview_col, text="Preview", bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY).pack(anchor="e")
+        self.aspect_canvas = tk.Canvas(preview_col, width=150, height=100, bg="#0e0e10", highlightthickness=0)
+        self.aspect_canvas.pack()
+        self.display_width_var.trace_add("write", self._redraw_aspect_preview)
+        self.display_height_var.trace_add("write", self._redraw_aspect_preview)
+        self._redraw_aspect_preview()
+
         tk.Label(
             frame,
             text="Only affects iiSU's own UI smoothness inside the AVD -- actual\n"
@@ -309,28 +371,54 @@ class SetupApp(tk.Tk):
             "already uses your monitor's real refresh rate with no setup needed.",
             bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY,
             justify="left",
-        ).grid(row=5, column=0, columnspan=2, sticky="w", padx=16, pady=(6, 8))
+        ).grid(row=2, column=0, columnspan=2, sticky="w", padx=16, pady=(10, 8))
 
         ttk.Button(
             frame, text="Auto-detect from primary monitor", style="Ghost.TButton", command=self._autodetect_display
-        ).grid(row=6, column=0, columnspan=2, sticky="w", padx=16, pady=(4, 0))
+        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=16, pady=(4, 0))
 
         self.iisu_fullscreen_var = tk.BooleanVar(value=self.config_data.get("iisu_fullscreen", True))
         ttk.Checkbutton(
             frame, text="Maximize the iiSU/AVD window automatically", variable=self.iisu_fullscreen_var
-        ).grid(row=7, column=0, columnspan=2, sticky="w", padx=16, pady=(12, 0))
+        ).grid(row=4, column=0, columnspan=2, sticky="w", padx=16, pady=(12, 0))
 
-        tk.Label(frame, text="AVD name:", bg=PANEL_BG, fg=TEXT, font=FONT_BODY).grid(row=8, column=0, sticky="w", padx=16, pady=(16, 0))
+        tk.Label(frame, text="AVD name:", bg=PANEL_BG, fg=TEXT, font=FONT_BODY).grid(row=5, column=0, sticky="w", padx=16, pady=(16, 0))
         self.avd_name_var = tk.StringVar(value=self.config_data.get("avd_name", "medium_phone"))
         tk.Entry(frame, textvariable=self.avd_name_var, width=20, **ENTRY_KWARGS).grid(
-            row=9, column=0, sticky="w", padx=16, pady=(4, 8)
+            row=6, column=0, sticky="w", padx=16, pady=(4, 8)
         )
 
         ttk.Button(
             frame, text="Apply now (saves + cold-boots the AVD)", style="Accent.TButton", command=self._apply_display
-        ).grid(row=10, column=0, columnspan=2, sticky="w", padx=16, pady=(8, 0))
+        ).grid(row=7, column=0, columnspan=2, sticky="w", padx=16, pady=(8, 0))
         self.display_status_label = tk.Label(frame, text="", bg=PANEL_BG, fg=GRADIENT_STOPS[2], font=FONT_BODY)
-        self.display_status_label.grid(row=11, column=0, columnspan=2, sticky="w", padx=16, pady=(8, 16))
+        self.display_status_label.grid(row=8, column=0, columnspan=2, sticky="w", padx=16, pady=(8, 16))
+
+    def _apply_resolution_preset(self, event=None) -> None:
+        choice = self.resolution_preset_var.get()
+        if "x" not in choice:
+            return
+        width, height = (part.strip() for part in choice.split("x"))
+        self.display_width_var.set(width)
+        self.display_height_var.set(height)
+
+    def _redraw_aspect_preview(self, *_args) -> None:
+        canvas = self.aspect_canvas
+        canvas.delete("all")
+        box_w, box_h = int(canvas["width"]), int(canvas["height"])
+        try:
+            width = int(self.display_width_var.get())
+            height = int(self.display_height_var.get())
+        except ValueError:
+            return
+        if width <= 0 or height <= 0:
+            return
+        margin = 10
+        scale = min((box_w - margin * 2) / width, (box_h - margin * 2) / height)
+        rect_w, rect_h = width * scale, height * scale
+        x0, y0 = (box_w - rect_w) / 2, (box_h - rect_h) / 2
+        canvas.create_rectangle(x0, y0, x0 + rect_w, y0 + rect_h, fill=PANEL_BG_HOVER, outline=GRADIENT_STOPS[2], width=2)
+        canvas.create_text(box_w / 2, box_h / 2, text=f"{width}×{height}", fill=TEXT, font=FONT_BODY)
 
     def _autodetect_display(self):
         width, height, hz = winapi.get_primary_monitor_mode()
@@ -361,34 +449,13 @@ class SetupApp(tk.Tk):
         self.port_var = tk.StringVar(value=str(self.config_data.get("bridge_port", 7737)))
         tk.Entry(frame, textvariable=self.port_var, width=10, **ENTRY_KWARGS).grid(row=3, column=0, sticky="w", padx=16, pady=(4, 8))
 
-        tk.Label(frame, text="Quit-to-frontend hotkey modifiers (ctrl/alt/shift/win, comma-separated):", bg=PANEL_BG, fg=TEXT, font=FONT_BODY).grid(
-            row=4, column=0, sticky="w", padx=16
+        self.quit_hotkey_vars = self._build_hotkey_editor(
+            frame, row=4, title="Quit-to-frontend hotkey (force-quits the running emulator, returns to iiSU):",
+            initial=self.config_data.get("quit_hotkey", {"modifiers": ["ctrl", "alt"], "key": "q"}),
         )
-        hotkey = self.config_data.get("quit_hotkey", {"modifiers": ["ctrl", "alt"], "key": "q"})
-        self.hotkey_mods_var = tk.StringVar(value=", ".join(hotkey.get("modifiers", [])))
-        tk.Entry(frame, textvariable=self.hotkey_mods_var, width=30, **ENTRY_KWARGS).grid(
-            row=5, column=0, sticky="w", padx=16, pady=(4, 8)
-        )
-
-        tk.Label(frame, text="Quit-to-frontend hotkey key:", bg=PANEL_BG, fg=TEXT, font=FONT_BODY).grid(row=6, column=0, sticky="w", padx=16)
-        self.hotkey_key_var = tk.StringVar(value=hotkey.get("key", "q"))
-        tk.Entry(frame, textvariable=self.hotkey_key_var, width=10, **ENTRY_KWARGS).grid(
-            row=7, column=0, sticky="w", padx=16, pady=(4, 8)
-        )
-
-        tk.Label(frame, text="Full-shutdown hotkey modifiers (closes iiSU and the AVD entirely):", bg=PANEL_BG, fg=TEXT, font=FONT_BODY).grid(
-            row=8, column=0, sticky="w", padx=16
-        )
-        shutdown_hotkey = self.config_data.get("shutdown_hotkey", {"modifiers": ["ctrl", "alt"], "key": "x"})
-        self.shutdown_hotkey_mods_var = tk.StringVar(value=", ".join(shutdown_hotkey.get("modifiers", [])))
-        tk.Entry(frame, textvariable=self.shutdown_hotkey_mods_var, width=30, **ENTRY_KWARGS).grid(
-            row=9, column=0, sticky="w", padx=16, pady=(4, 8)
-        )
-
-        tk.Label(frame, text="Full-shutdown hotkey key:", bg=PANEL_BG, fg=TEXT, font=FONT_BODY).grid(row=10, column=0, sticky="w", padx=16)
-        self.shutdown_hotkey_key_var = tk.StringVar(value=shutdown_hotkey.get("key", "x"))
-        tk.Entry(frame, textvariable=self.shutdown_hotkey_key_var, width=10, **ENTRY_KWARGS).grid(
-            row=11, column=0, sticky="w", padx=16, pady=(4, 8)
+        self.shutdown_hotkey_vars = self._build_hotkey_editor(
+            frame, row=7, title="Full-shutdown hotkey (closes iiSU and the AVD entirely):",
+            initial=self.config_data.get("shutdown_hotkey", {"modifiers": ["ctrl", "alt"], "key": "x"}),
         )
 
         tk.Label(
@@ -398,9 +465,61 @@ class SetupApp(tk.Tk):
             "the very next game launch, no restart needed).",
             bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY,
             justify="left",
-        ).grid(row=12, column=0, sticky="w", padx=16, pady=(8, 16))
+        ).grid(row=10, column=0, sticky="w", padx=16, pady=(8, 16))
+
+    def _build_hotkey_editor(self, parent, row: int, title: str, initial: dict) -> dict:
+        """Builds one hotkey's editor -- a checkbox per modifier plus a
+        "press a key" capture button instead of free-typed text -- and
+        returns the tk variables backing it, read back in save()."""
+        tk.Label(parent, text=title, bg=PANEL_BG, fg=TEXT, font=FONT_BODY).grid(
+            row=row, column=0, columnspan=2, sticky="w", padx=16, pady=(4, 2)
+        )
+
+        initial_mods = {m.lower() for m in initial.get("modifiers", [])}
+        mod_row = tk.Frame(parent, bg=PANEL_BG)
+        mod_row.grid(row=row + 1, column=0, columnspan=2, sticky="w", padx=16)
+        mod_vars = {}
+        for name in MODIFIER_NAMES:
+            var = tk.BooleanVar(value=name in initial_mods)
+            mod_vars[name] = var
+            ttk.Checkbutton(mod_row, text=name.capitalize(), variable=var).pack(side="left", padx=(0, 12))
+
+        key_row = tk.Frame(parent, bg=PANEL_BG)
+        key_row.grid(row=row + 2, column=0, columnspan=2, sticky="w", padx=16, pady=(4, 8))
+        tk.Label(key_row, text="+", bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY).pack(side="left", padx=(0, 8))
+        key_var = tk.StringVar(value=initial.get("key", ""))
+        key_display = tk.Label(key_row, textvariable=key_var, width=8, bg="#0e0e10", fg=TEXT, font=FONT_BODY, relief="flat", padx=8, pady=4)
+        key_display.pack(side="left")
+        capture_button = ttk.Button(key_row, text="Press a key...", style="Ghost.TButton")
+        capture_button.configure(command=lambda: self._capture_key(key_var, capture_button))
+        capture_button.pack(side="left", padx=(8, 0))
+
+        return {"mods": mod_vars, "key": key_var}
+
+    def _capture_key(self, key_var: tk.StringVar, button: ttk.Button) -> None:
+        original_text = button.cget("text")
+        button.configure(text="press any key...", state="disabled")
+
+        def on_key(event: tk.Event) -> None:
+            self.unbind("<KeyPress>")
+            # keysym is unreliable for some synthetic/IME input (comes back
+            # as the literal string "??"); event.char still has the actual
+            # character in that case, so fall back to it.
+            keysym = event.keysym if event.keysym not in ("??", "") else event.char
+            if keysym:
+                key_var.set(keysym.lower())
+            button.configure(text=original_text, state="normal")
+
+        self.bind("<KeyPress>", on_key)
 
     # -- Save -------------------------------------------------
+
+    @staticmethod
+    def _read_hotkey(hotkey_vars: dict, default_key: str) -> dict:
+        return {
+            "modifiers": [name for name, var in hotkey_vars["mods"].items() if var.get()],
+            "key": hotkey_vars["key"].get().strip() or default_key,
+        }
 
     def save(self):
         original_emulators = self.config_data.get("emulators", {})
@@ -451,14 +570,8 @@ class SetupApp(tk.Tk):
             ),
             "avd_name": self.avd_name_var.get().strip() or "medium_phone",
             "display": display,
-            "quit_hotkey": {
-                "modifiers": [s.strip() for s in self.hotkey_mods_var.get().split(",") if s.strip()],
-                "key": self.hotkey_key_var.get().strip() or "q",
-            },
-            "shutdown_hotkey": {
-                "modifiers": [s.strip() for s in self.shutdown_hotkey_mods_var.get().split(",") if s.strip()],
-                "key": self.shutdown_hotkey_key_var.get().strip() or "x",
-            },
+            "quit_hotkey": self._read_hotkey(self.quit_hotkey_vars, default_key="q"),
+            "shutdown_hotkey": self._read_hotkey(self.shutdown_hotkey_vars, default_key="x"),
             "emulators": emulators,
         }
 

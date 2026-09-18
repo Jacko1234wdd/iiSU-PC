@@ -25,9 +25,9 @@ Once everything's confirmed working, the installer deletes its own copy of the A
 
 ## Day to day use
 
-Run **`iiSU-PC.bat`** (in this folder) — one control panel with live status, Start/Stop, and a button into the ROM directory / PC emulator / hotkey / display settings.
+Run **`iiSU-PC.bat`** (in this folder) — one control panel with live status, Start/Stop, a button into the ROM directory / PC emulator / hotkey / display settings, and a button to create a desktop shortcut that launches straight into iiSU (skipping the control panel).
 
-Inside the VM, `Ctrl+Alt+Q` force-quits the current game and returns to iiSU; `Ctrl+Alt+X` closes iiSU and shuts down the VM entirely.
+Inside the VM, `Ctrl+Alt+Q` force-quits the current game and returns to iiSU; `Ctrl+Alt+X` closes iiSU and shuts down the VM entirely (both rebindable in Configure). Holding **Back+Start** together on a controller for 2.5s does the same full shutdown, no keyboard needed.
 
 ## How it works, briefly
 
@@ -49,12 +49,15 @@ installer/
 bridge/
   control_panel.py         day-to-day GUI: status, Start/Stop, opens config_editor.py
   config_editor.py         GUI for editing config.json (ROM dir, emulators, display, hotkeys)
+  bridge_config.py         shared config.json loader (used by everything below)
   start_iisu_pc.py         boots the AVD (if needed) and starts launch_bridge.py
   stop_iisu_pc.py          tears both back down
   launch_bridge.py         listens for launch requests from the patched APK, runs the PC emulator
-  controller_bridge.py     forwards Xbox-compatible controller input into the AVD for menu nav
+  controller_bridge.py     forwards controller input into the AVD; Back+Start closes everything
   portable_sdk.py          copies the SDK/AVD into a self-contained folder under bridge/
   sync_library.py          mirrors your real ROM library into the AVD as scan-only placeholders
+  console_names.py         resolves a ROM folder name to one of iiSU's known consoles
+  create_shortcut.py       creates the desktop shortcut, extracting iiSU's icon from your APK
   winapi.py                shared Win32 window-management helpers
 ```
 
