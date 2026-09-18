@@ -184,6 +184,35 @@ RETROARCH_BY_EXTENSION = [
 ]
 
 
+# A handful of Android libretro cores append a GPU-backend suffix that
+# Windows builds don't use (Windows resolves the rendering backend a
+# different way, not via the core filename) -- these need an explicit
+# remap rather than the generic "strip _android, swap .so for .dll"
+# transform retroarch_core_dll_for_android_core() otherwise applies.
+ANDROID_CORE_NAME_OVERRIDES = {
+    "mupen64plus_next_gles3": "mupen64plus_next",
+    "mupen64plus_next_gles2": "mupen64plus_next",
+}
+
+
+def retroarch_core_dll_for_android_core(android_core_filename: str) -> str | None:
+    """Translates the Android libretro core .so filename iiSU/RetroArch
+    itself reports launching (the LIBRETRO intent extra) into the matching
+    Windows core .dll filename, so a RetroArch launch uses whichever core
+    is actually configured on the Android side instead of this module's
+    own per-extension guess (RETROARCH_BY_EXTENSION) -- confirmed live:
+    iiSU launched a 32X ROM with picodrive_libretro_android.so where the
+    curated default for that extension guesses Genesis Plus GX, a real,
+    user-visible mismatch this avoids whenever the extra is present.
+    Returns None if the filename doesn't look like a libretro-android core
+    at all, so the caller can fall back to the extension-based guess."""
+    if not android_core_filename.endswith("_libretro_android.so"):
+        return None
+    core_name = android_core_filename.removesuffix("_libretro_android.so")
+    core_name = ANDROID_CORE_NAME_OVERRIDES.get(core_name, core_name)
+    return f"{core_name}_libretro.dll"
+
+
 def build_emulators_map() -> dict:
     """Builds the full bridge/config.json "emulators" map from the two
     lists above. Standalone entries with the same package (e.g. GameCube

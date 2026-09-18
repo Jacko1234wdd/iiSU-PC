@@ -48,6 +48,9 @@ from urllib.parse import unquote
 
 from bridge_config import ConfigMissingError, load_config
 from controller_bridge import ControllerBridge
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from shared.emulator_defaults import retroarch_core_dll_for_android_core
 from winapi import (
     SW_MINIMIZE,
     SW_RESTORE,
@@ -154,21 +157,39 @@ def find_rom(rom_filename: str, roms_dir: Path, cache: dict) -> Path | None:
     return None
 
 
-def find_emulator_for_package(package: str, emulators: dict, rom_filename: str | None) -> dict | None:
+def find_emulator_for_package(package: str, emulators: dict, rom_filename: str | None, android_core: str | None) -> dict | None:
     """RetroArch (com.retroarch) is a multi-core, multi-console frontend on
     the Android side -- iiSU reports the same package for it regardless of
     which system the game actually is, so unlike every other (single-system)
     package here, its profile can't just be "one PC exe". Its entry is
-    instead a "by_extension" map, resolved by the ROM's own file extension
-    to the real dedicated PC emulator for that system."""
+    instead a "by_extension" map, normally resolved by the ROM's own file
+    extension to the real dedicated PC emulator for that system.
+
+    android_core (the intent's LIBRETRO extra, when present) takes priority
+    over that extension guess whenever it resolves to a known Windows core
+    -- it's the *actual* core iiSU/RetroArch decided to launch with, which
+    can legitimately differ from this project's own curated default (a real
+    ROM confirmed this live: a .zip-packaged 32X game, an extension not even
+    in the curated map, launched by iiSU with PicoDrive rather than the
+    curated Genesis Plus GX). The exe_names/pre_args *shape* still comes
+    from an existing by_extension entry -- only the resolved core filename
+    is substituted in -- so config.json stays the source of truth for how
+    RetroArch itself gets invoked, not a hardcoded literal here."""
     for prefix, profile in emulators.items():
         if not package.startswith(prefix):
             continue
         if "by_extension" in profile:
+            by_ext = profile["by_extension"]
+            if android_core:
+                core_dll = retroarch_core_dll_for_android_core(android_core)
+                template = next((e for e in by_ext.values() if "-L" in e.get("pre_args", [])), None)
+                if core_dll and template:
+                    pre_args = [f"cores/{core_dll}" if arg.startswith("cores/") else arg for arg in template["pre_args"]]
+                    return {"exe_names": template["exe_names"], "pre_args": pre_args}
             if rom_filename is None:
                 return None
             ext = Path(rom_filename).suffix.lower()
-            return profile["by_extension"].get(ext)
+            return by_ext.get(ext)
         return profile
     return None
 
@@ -336,6 +357,18 @@ def handle_request(raw_intent: str) -> None:
         for line in raw_intent.splitlines()
         if line.startswith("CLIPURI:")
     ]
+    # RetroArch launches (and possibly other libretro-frontend launches)
+    # pass the ROM and the exact core to use as plain Intent extras instead
+    # of a data URI/ClipData -- confirmed live: iiSU launches RetroArch
+    # exclusively this way, never through the URI mechanism every other
+    # emulator here uses, so without parsing these, RetroArch games never
+    # launched at all regardless of how config.json's by_extension map was
+    # set up. The smali patch already sends every extra as "EXTRA:key=value".
+    extras = dict(
+        line.removeprefix("EXTRA:").split("=", 1)
+        for line in raw_intent.splitlines()
+        if line.startswith("EXTRA:") and "=" in line
+    )
 
     if not cmp_match:
         print("[bridge] no component in intent, ignoring")
@@ -352,9 +385,15 @@ def handle_request(raw_intent: str) -> None:
     search_roots = [Path(p) for p in config["search_roots"]]
     roms_dir = Path(config["roms_dir"])
 
-    rom_filename = unquote(data_uri).rsplit("/", 1)[-1] if data_uri else None
+    if data_uri:
+        rom_filename = unquote(data_uri).rsplit("/", 1)[-1]
+    elif "ROM" in extras:
+        # Already a plain filesystem path, not URI-encoded -- no unquote().
+        rom_filename = extras["ROM"].rsplit("/", 1)[-1]
+    else:
+        rom_filename = None
 
-    profile = find_emulator_for_package(package, config["emulators"], rom_filename)
+    profile = find_emulator_for_package(package, config["emulators"], rom_filename, extras.get("LIBRETRO"))
     if profile is None:
         print(f"[bridge] no known PC emulator mapped for package '{package}' (rom '{rom_filename}')")
         return
