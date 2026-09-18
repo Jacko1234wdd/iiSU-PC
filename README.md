@@ -12,20 +12,20 @@ Runs iiSU (an Android emulation frontend) inside a Windows-hosted Android VM, pa
 - Your own copy of the iiSU APK
 - Whichever PC emulators you actually want to use (DuckStation, Dolphin, PCSX2, etc.) — install these yourself; this tool doesn't bundle them either
 - A few GB of free disk space and a decent internet connection (first run downloads the Android SDK + a system image)
-- Optional: [Pillow](https://pypi.org/project/pillow/) (`pip install pillow`) if you want the "Desktop Shortcut" button to use iiSU's own icon (extracted from your APK) instead of a generic one
+- Optional: [Pillow](https://pypi.org/project/pillow/) (`pip install pillow`) if you want the desktop shortcut Setup.bat creates to use iiSU's own icon (extracted from your APK) instead of a generic one
 
 ## First-time setup
 
 1. Drop your iiSU APK into `installer/input/` (any filename, `.apk` extension).
 2. Run `Setup.bat` (in this folder).
 
-This downloads and sets up a self-contained Android SDK and virtual device (nothing touches any existing Android Studio install), patches your APK, and gets it installed. It can take a while and several GB on first run.
+This downloads and sets up a self-contained Android SDK and virtual device (nothing touches any existing Android Studio install), patches your APK, gets it installed, and creates a desktop shortcut that launches straight into iiSU. It can take a while and several GB on first run.
 
 Once everything's confirmed working, the installer deletes its own copy of the Android SDK (`installer/android-sdk/`, ~3.7GB) since `bridge/`'s portable copy has everything it needs going forward. The tradeoff: re-running `Setup.bat` later for a *different* iiSU APK re-downloads that SDK from scratch rather than reusing it.
 
 ## Day to day use
 
-Run **`iiSU-PC.bat`** (in this folder) — one control panel with live status, Start/Stop, a button into the ROM directory / PC emulator / hotkey / display settings, and a button to create a desktop shortcut that launches straight into iiSU (skipping the control panel).
+Double-click the **desktop shortcut** Setup.bat created to launch straight into iiSU, or run **`iiSU-PC.bat`** (in this folder) for the control panel — live status, Start/Stop, and a button into the ROM directory / PC emulator / hotkey / display settings.
 
 Inside the VM, `Ctrl+Alt+Q` force-quits the current game and returns to iiSU; `Ctrl+Alt+X` closes iiSU and shuts down the VM entirely (both rebindable in Configure). Holding **Back+Start** together on a controller for 2.5s does the same full shutdown, no keyboard needed.
 

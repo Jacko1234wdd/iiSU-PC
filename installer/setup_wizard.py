@@ -220,6 +220,19 @@ def write_bridge_config(avd_name: str) -> None:
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
+def create_desktop_shortcut() -> None:
+    """A shortcut straight to iiSU is worth having by default -- not
+    something worth failing setup over if it doesn't work, so any problem
+    here is reported and swallowed rather than raised."""
+    sys.path.insert(0, str(BRIDGE_DIR))
+    import create_shortcut
+    try:
+        shortcut_path = create_shortcut.create_desktop_shortcut()
+        print(f"[setup] created a desktop shortcut: {shortcut_path}")
+    except Exception as e:
+        print(f"[setup] couldn't create a desktop shortcut ({e}) -- you can still use iiSU-PC.bat directly")
+
+
 def run_setup(apk_path: Path) -> None:
     """Does the actual work, given a source APK path -- shared by the CLI
     entry point below and setup_gui.py, so both stay in sync with exactly
@@ -264,6 +277,7 @@ def run_setup(apk_path: Path) -> None:
 
     write_bridge_config(DEFAULT_AVD_NAME)
     cleanup_installer_sdk()
+    create_desktop_shortcut()
 
     print("\n=== Setup complete ===")
     print(f"iiSU is installed and the bridge is configured for AVD '{DEFAULT_AVD_NAME}'.")
