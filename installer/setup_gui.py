@@ -175,15 +175,8 @@ class SetupApp(tk.Tk):
 
         if error is None:
             self.status_label.config(text="Setup complete.", fg=GREEN)
-            messagebox.showinfo(
-                "Setup complete",
-                "iiSU is installed and the bridge is configured.\n\n"
-                "Opening the settings window next -- point it at your ROM library and "
-                "review the emulator/display defaults there, so there's nothing left to "
-                "configure by hand afterward.",
-            )
             self._show_next_steps()
-            self._open_config_editor()
+            self._open_onboarding()
         else:
             self.status_label.config(text=f"Setup failed: {error}", fg=RED)
             messagebox.showerror("Setup failed", f"{error}\n\nSee the log for details.")
@@ -204,13 +197,18 @@ class SetupApp(tk.Tk):
             command=self._open_config_editor,
         ).pack(side="left", padx=(10, 0))
 
-    def _open_config_editor(self) -> None:
+    def _open_onboarding(self) -> None:
         """Runs right after a successful setup, unprompted -- roms_dir still
         holds the template's placeholder value at this point, so without
         this the frontend would show an empty library until the user found
-        their own way to config_editor.py (normally tucked behind
-        control_panel.py's Configure button). Same invocation control_panel.py
-        itself uses, so it behaves identically either way it's opened."""
+        their own way to a settings screen. Walks through ROM directory,
+        emulator folders, display, and hotkeys one step at a time instead
+        of dropping the tabbed editor on someone who's never seen this
+        app before; that editor (config_editor.py) is still there
+        afterward via "Open Settings" for anything this doesn't cover."""
+        subprocess.Popen([sys.executable, "onboarding_wizard.py"], cwd=str(BRIDGE_DIR))
+
+    def _open_config_editor(self) -> None:
         subprocess.Popen([sys.executable, "config_editor.py"], cwd=str(BRIDGE_DIR))
 
     def _create_shortcut(self) -> None:

@@ -211,3 +211,16 @@ def all_stub_packages() -> list[tuple[str, str]]:
         seen.setdefault(entry["package"], entry["app_label"])
     seen.setdefault(RETROARCH_PACKAGE, RETROARCH_APP_LABEL)
     return list(seen.items())
+
+
+def all_emulator_exe_names() -> list[tuple[str, list[str]]]:
+    """(app_label, exe_names) for every standalone emulator plus RetroArch
+    itself, one per unique label -- for UIs that want to check which of
+    these are actually installed under a set of search folders (see
+    bridge/launch_bridge.py's find_executable, which this is meant to be
+    used with for a result that matches what a real launch would find)."""
+    seen = {}
+    for entry in STANDALONE_DEFAULTS:
+        seen.setdefault(entry["app_label"], entry["exe_names"])
+    seen.setdefault(RETROARCH_APP_LABEL, ["retroarch.exe"])
+    return list(seen.items())

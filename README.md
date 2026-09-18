@@ -21,7 +21,7 @@ Runs iiSU (an Android emulation frontend) inside a Windows-hosted Android VM, pa
 
 This downloads and sets up a self-contained Android SDK and virtual device (nothing touches any existing Android Studio install), patches your APK, gets it installed, installs a redirector app for every console `shared/emulator_defaults.py` knows about, and creates a desktop shortcut that launches straight into iiSU. It can take a while and several GB on first run.
 
-Once it's done, the settings window opens automatically so you can point it at your ROM library and review the emulator/display defaults right there — there's no separate manual-configuration step to remember afterward.
+Once it's done, a short step-by-step onboarding wizard opens automatically — ROM directory, emulator search folders (with a button to scan for what's already installed), display resolution, and hotkeys, one screen at a time with live feedback, finishing with a summary before it saves anything. There's no separate manual-configuration step to remember afterward; `config_editor.py`'s full tabbed editor is still there later for anything the wizard doesn't cover.
 
 Once everything's confirmed working, the installer deletes its own copy of the Android SDK (`installer/android-sdk/`, ~3.7GB) since `bridge/`'s portable copy has everything it needs going forward. The tradeoff: re-running `Setup.bat` later for a *different* iiSU APK re-downloads that SDK from scratch rather than reusing it.
 
@@ -55,8 +55,10 @@ installer/
 
 bridge/
   control_panel.py         day-to-day GUI: status, Start/Stop, opens config_editor.py
-  config_editor.py         GUI for editing config.json (ROM dir, emulators, display, hotkeys)
+  onboarding_wizard.py     step-by-step first-run setup, launched automatically after Setup.bat
+  config_editor.py         tabbed GUI for editing config.json later (ROM dir, emulators, display, hotkeys)
   bridge_config.py         shared config.json loader (used by everything below)
+  apply_display.py         applies config.json's display settings to the AVD and cold-boots it
   start_iisu_pc.py         boots the AVD (if needed) and starts launch_bridge.py
   stop_iisu_pc.py          tears both back down
   launch_bridge.py         listens for launch requests from the patched APK, runs the PC emulator
