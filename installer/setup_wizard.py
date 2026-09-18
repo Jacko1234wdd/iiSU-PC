@@ -129,11 +129,13 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
         print("[setup] an AVD instance is already up from an earlier attempt -- reusing it...")
     else:
         print("[setup] booting the AVD once to install iiSU (this can take a minute)...")
+        import portable_sdk
+        portable_sdk.disable_quickboot_autosave(portable_sdk.PORTABLE_AVD_HOME / f"{avd_name}.avd")
         log_path = WORK_DIR / "first_boot_emulator.log"
         log_file = open(log_path, "wb")
         try:
             process = subprocess.Popen(
-                [str(emulator_exe), "-avd", avd_name],
+                [str(emulator_exe), "-avd", avd_name, "-no-snapshot"],
                 creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,

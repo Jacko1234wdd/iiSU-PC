@@ -53,6 +53,53 @@ def _find_real_avd_ini(avd_name: str) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+# Android's own "medium_phone" device profile (what `android emulator
+# create` uses -- see sdk_bootstrap.py) turns on a removable SD card by
+# default, but nothing ever creates the sdcard.img file it needs: the
+# emulator doesn't auto-create one, so this device permanently shows a
+# "mounted" SD card slot with no actual backing storage. Nothing in this
+# project uses it (ROM placeholders live under internal storage,
+# /sdcard/Roms, which is unrelated), so it's disabled outright rather than
+# creating a throwaway image just to satisfy it. forceColdBoot is set as a
+# second line of defense alongside the -no-snapshot launch flag in
+# start_iisu_pc.py, in case anything ever launches this AVD another way.
+CONFIG_INI_OVERRIDES = {
+    "hw.sdCard": "no",
+    "fastboot.forceColdBoot": "yes",
+}
+
+
+def _patch_config_ini(config_ini: Path) -> None:
+    if not config_ini.is_file():
+        return
+    lines = config_ini.read_text(encoding="utf-8").splitlines()
+    seen = set()
+    new_lines = []
+    for line in lines:
+        key = line.split("=", 1)[0] if "=" in line else None
+        if key in CONFIG_INI_OVERRIDES:
+            new_lines.append(f"{key}={CONFIG_INI_OVERRIDES[key]}")
+            seen.add(key)
+        else:
+            new_lines.append(line)
+    for key, value in CONFIG_INI_OVERRIDES.items():
+        if key not in seen:
+            new_lines.append(f"{key}={value}")
+    config_ini.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+
+def disable_quickboot_autosave(avd_dir: Path) -> None:
+    """The emulator rewrites its own quickbootChoice.ini on exit based on
+    its current save-on-exit preference, independent of the -no-snapshot
+    launch flag -- confirmed live: passing -no-snapshot still left a fresh
+    multi-GB snapshot behind after a graceful `adb emu kill`, because this
+    file already had saveOnExit=true from some earlier run. Pinning it
+    back to false right before every launch (not just once) is what
+    actually guarantees a clean exit never leaves one behind, regardless
+    of what the previous run's exit wrote here."""
+    (avd_dir / "quickbootChoice.ini").write_text("saveOnExit = false\n", encoding="utf-8")
+
+
 def _read_image_sysdir(avd_dir: Path) -> str | None:
     config_ini = avd_dir / "config.ini"
     if not config_ini.is_file():
@@ -115,6 +162,7 @@ def ensure_portable_sdk(avd_name: str, source_sdk_root: Path) -> dict:
         # emulator just does a normal boot instead of a quickboot resume
         # the first time on the portable copy.
         _robocopy(real_avd_dir, portable_avd_dir, exclude_dirs=["snapshots"])
+        _patch_config_ini(portable_avd_dir / "config.ini")
         real_avd_ini = _find_real_avd_ini(avd_name)
         PORTABLE_AVD_HOME.mkdir(parents=True, exist_ok=True)
         portable_ini = PORTABLE_AVD_HOME / f"{avd_name}.ini"

@@ -19,6 +19,14 @@ problem, and we poll `adb devices` ourselves to know when it's ready.
 It also always launches from the portable SDK/AVD copy under
 android-sdk-portable/ (see portable_sdk.py) rather than the system-wide
 Android Studio install -- see portable_sdk.py for why.
+
+Always launches with -no-snapshot: a quickboot-resumed AVD carries its
+mount/storage state forward from whenever the snapshot was captured,
+which can go stale in ways a fresh boot doesn't hit (e.g. the emulated
+SD card failing to (re)mount correctly). A real cold boot costs maybe
+30-60s more; that's cheap insurance against a whole class of "why is my
+storage broken" bug reports compared to a snapshot resume that's a few
+seconds faster but occasionally wrong.
 """
 
 import json
@@ -30,7 +38,7 @@ import time
 from pathlib import Path
 
 from bridge_config import ConfigMissingError, load_config
-from portable_sdk import PORTABLE_AVD_HOME, PORTABLE_SDK, ensure_portable_sdk
+from portable_sdk import PORTABLE_AVD_HOME, PORTABLE_SDK, disable_quickboot_autosave, ensure_portable_sdk
 
 BRIDGE_SCRIPT = Path(__file__).parent / "launch_bridge.py"
 STATE_PATH = Path(__file__).parent / ".runtime_state.json"
@@ -152,7 +160,7 @@ def _launch_once(emulator_exe: Path, avd_name: str, env: dict, usb_passthrough: 
     log_file = open(EMULATOR_LOG_PATH, "wb")
     try:
         process = subprocess.Popen(
-            [str(emulator_exe), "-avd", avd_name, *build_usb_passthrough_args(usb_passthrough)],
+            [str(emulator_exe), "-avd", avd_name, "-no-snapshot", *build_usb_passthrough_args(usb_passthrough)],
             creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
             stdin=subprocess.DEVNULL,
             stdout=log_file,
@@ -211,6 +219,7 @@ def start_avd(avd_name: str, usb_passthrough: list[dict]) -> int | None:
 
     for attempt in range(1, MAX_LAUNCH_ATTEMPTS + 1):
         clear_stale_locks(avd_dir)
+        disable_quickboot_autosave(avd_dir)
         pid = _launch_once(emulator_exe, avd_name, env, usb_passthrough)
         if pid is not None:
             return pid
@@ -251,8 +260,12 @@ def main() -> None:
             cwd=str(BRIDGE_SCRIPT.parent),
         )
         state["bridge_pid"] = bridge_process.pid
-        # Give it a moment to bind before reporting success.
-        for _ in range(20):
+        # Give it a moment to bind before reporting success. Generous on
+        # purpose: launch_iisu() inside the bridge retries `am start` for up
+        # to a minute on its own (package manager can take a while to be
+        # ready right after a cold boot -- see its docstring), and the
+        # socket doesn't open until after that succeeds.
+        for _ in range(120):
             if is_port_open(port):
                 break
             time.sleep(0.5)

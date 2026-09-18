@@ -66,3 +66,4 @@ bridge/
 - `installer/patch_iisu.py`'s patch is anchored on a specific log string in iiSU's code. If iiSU updates and changes that code, the patch will fail loudly with a clear error rather than silently producing a broken build — it needs updating by hand at that point, not just a re-run.
 - `bridge/emulator.log` has the Android emulator's own output if the VM won't boot.
 - Re-running `Setup.bat` is safe — it skips anything already done (SDK, AVD, keystore) and won't overwrite an existing `bridge/config.json`'s ROM directory/emulator settings.
+- The AVD always cold-boots and never keeps a resume snapshot around (removed automatically after every clean Stop) — a resumed snapshot can carry forward storage/mount state that's since gone stale, so this trades a bit of boot time for not hitting that class of bug.
