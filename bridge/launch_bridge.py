@@ -46,6 +46,7 @@ from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import unquote
 
+from bridge_config import ConfigMissingError, load_config
 from controller_bridge import ControllerBridge
 from winapi import (
     SW_MINIMIZE,
@@ -59,7 +60,6 @@ from winapi import (
     wait_for_window_by_pid,
 )
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
 STOP_SCRIPT = Path(__file__).parent / "stop_iisu_pc.py"
 PATH_CACHE_PATH = Path(__file__).parent / ".path_cache.json"
 
@@ -85,11 +85,6 @@ INTENT_DAT_RE = re.compile(r"dat=(\S+)")
 # quit hotkey listener (on its own thread) has something to terminate.
 current_process: subprocess.Popen | None = None
 current_process_lock = threading.Lock()
-
-
-def load_config() -> dict:
-    with open(CONFIG_PATH, encoding="utf-8") as f:
-        return json.load(f)
 
 
 def load_path_cache() -> dict:
@@ -315,7 +310,11 @@ def handle_request(raw_intent: str) -> None:
     # Reloaded fresh per request (not once at startup) so edits made in
     # config_editor.py take effect on the very next launch without restarting
     # the bridge process.
-    config = load_config()
+    try:
+        config = load_config()
+    except ConfigMissingError as e:
+        print(f"[bridge] {e}")
+        return
 
     cmp_match = INTENT_CMP_RE.search(raw_intent)
     dat_match = INTENT_DAT_RE.search(raw_intent)
@@ -390,7 +389,11 @@ def is_game_running() -> bool:
 
 
 def main() -> None:
-    config = load_config()
+    try:
+        config = load_config()
+    except ConfigMissingError as e:
+        print(f"[bridge] {e}")
+        sys.exit(1)
 
     threading.Thread(target=hotkey_listener, args=(config,), daemon=True).start()
 

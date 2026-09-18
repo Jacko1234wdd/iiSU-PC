@@ -29,9 +29,9 @@ import sys
 import time
 from pathlib import Path
 
+from bridge_config import ConfigMissingError, load_config
 from portable_sdk import PORTABLE_AVD_HOME, PORTABLE_SDK, ensure_portable_sdk
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
 BRIDGE_SCRIPT = Path(__file__).parent / "launch_bridge.py"
 STATE_PATH = Path(__file__).parent / ".runtime_state.json"
 EMULATOR_LOG_PATH = Path(__file__).parent / "emulator.log"
@@ -42,11 +42,6 @@ RETRY_DELAY = 5  # seconds
 
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
-
-
-def load_config() -> dict:
-    with open(CONFIG_PATH, encoding="utf-8") as f:
-        return json.load(f)
 
 
 def save_state(state: dict) -> None:
@@ -227,7 +222,11 @@ def start_avd(avd_name: str, usb_passthrough: list[dict]) -> int | None:
 
 
 def main() -> None:
-    config = load_config()
+    try:
+        config = load_config()
+    except ConfigMissingError as e:
+        print(f"[start] {e}")
+        sys.exit(1)
     avd_name = config["avd_name"]
     port = config["bridge_port"]
     state = {"avd_name": avd_name}

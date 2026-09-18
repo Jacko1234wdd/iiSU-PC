@@ -13,20 +13,13 @@ genuinely native resolution with no letterboxing.
 Run this after changing display settings in config_editor.py's Advanced tab.
 """
 
-import json
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 import winapi
-
-CONFIG_PATH = Path(__file__).parent / "config.json"
-
-
-def load_config() -> dict:
-    with open(CONFIG_PATH, encoding="utf-8") as f:
-        return json.load(f)
+from bridge_config import ConfigMissingError, load_config
 
 
 def avd_config_path(avd_name: str) -> Path:
@@ -68,7 +61,11 @@ def update_config_ini(path: Path, display: dict) -> None:
 
 
 def main() -> None:
-    config = load_config()
+    try:
+        config = load_config()
+    except ConfigMissingError as e:
+        print(e)
+        sys.exit(1)
     avd_name = config["avd_name"]
     display = config["display"]
 

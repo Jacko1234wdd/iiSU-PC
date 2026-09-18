@@ -18,13 +18,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import winapi
-
-CONFIG_PATH = Path(__file__).parent / "config.json"
-
-
-def load_config() -> dict:
-    with open(CONFIG_PATH, encoding="utf-8") as f:
-        return json.load(f)
+from bridge_config import CONFIG_PATH, ConfigMissingError, load_config
 
 
 def save_config(config: dict) -> None:
@@ -80,7 +74,12 @@ class SetupApp(tk.Tk):
         self.title("iiSU-PC Bridge Setup")
         self.geometry("640x560")
 
-        self.config_data = load_config()
+        try:
+            self.config_data = load_config()
+        except ConfigMissingError as e:
+            self.withdraw()
+            messagebox.showerror("Config not found", str(e))
+            sys.exit(1)
 
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True, padx=8, pady=8)
