@@ -31,6 +31,10 @@ Double-click the **desktop shortcut** Setup.bat created to launch straight into 
 
 Inside the VM, `Ctrl+Alt+Q` force-quits the current game and returns to iiSU; `Ctrl+Alt+X` closes iiSU and shuts down the VM entirely (both rebindable in Configure). Holding **Back+Start** together on a controller for 2.5s does the same full shutdown, no keyboard needed.
 
+## Uninstalling
+
+Run **`Uninstall.bat`** (in this folder) to remove everything Setup.bat and day-to-day use created: the Android VM and its portable SDK copy, `bridge/config.json`, the signing keystore, and the desktop shortcut. It does not touch your ROM library, your PC emulators, or the iiSU APK you supplied in `installer/input/`. It'll also print a note about `%LOCALAPPDATA%\Android\Sdk`, which the SDK downloader can end up writing into depending on how its underlying tool resolves its install root — left alone by default since a real Android Studio install would keep its own SDK there too.
+
 ## How it works, briefly
 
 `installer/patch_iisu.py` decompiles your iiSU APK, redirects its ROM-launch code to a small injected class that sends the launch request to `bridge/launch_bridge.py` over a local socket, then rebuilds and signs it with a key generated just for your install. The bridge matches the requested game to a PC emulator (configured in `bridge/config.json`) and launches it directly on Windows.
@@ -40,7 +44,7 @@ Before any of that can happen, though, iiSU needs to think a real emulator is in
 ## Project layout
 
 ```
-Setup.bat, iiSU-PC.bat     entry points -- launch the two GUIs below
+Setup.bat, iiSU-PC.bat, Uninstall.bat   entry points
 shared/theme.py            the dark/gradient look shared by both GUIs
 shared/emulator_defaults.py  curated console -> PC emulator mappings, and which need a redirector
 
@@ -52,6 +56,7 @@ installer/
   smali_patch/             the injected LaunchBridge classes patch_iisu.py adds to iiSU
   stub_apk.py              builds/installs the placeholder "redirector" apps (see below)
   stub_apk_template/       the (identical, per-package-renamed) redirector app project
+  uninstall.py             removes everything Setup.bat and day-to-day use create (see Uninstalling)
 
 bridge/
   control_panel.py         day-to-day GUI: status, Start/Stop, opens config_editor.py
