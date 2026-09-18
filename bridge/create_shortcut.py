@@ -16,6 +16,7 @@ Shells out to PowerShell's WScript.Shell COM object to create the actual
 extra Python package (pywin32/winshell) beyond what ships with Windows.
 """
 
+import ctypes
 import re
 import shutil
 import subprocess
@@ -132,6 +133,18 @@ def desktop_dir() -> Path:
     return Path(result.stdout.strip())
 
 
+def _refresh_shell_icon_cache() -> None:
+    """Windows caches rendered icon bitmaps keyed roughly by path, and
+    doesn't reliably notice when a .ico file's own content changes at the
+    same path (e.g. re-running setup against a different/updated APK) --
+    Explorer can keep showing the old icon indefinitely otherwise. This is
+    the standard, documented way to tell it to flush and re-render icon
+    associations, short of restarting explorer.exe entirely."""
+    SHCNE_ASSOCCHANGED = 0x08000000
+    SHCNF_IDLIST = 0x0000
+    ctypes.windll.shell32.SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None)
+
+
 def create_desktop_shortcut() -> Path:
     icon_path = extract_iisu_icon() or FALLBACK_ICON_PATH
     shortcut_path = desktop_dir() / SHORTCUT_NAME
@@ -148,6 +161,7 @@ def create_desktop_shortcut() -> Path:
     result = subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"Failed to create shortcut:\n{result.stdout}\n{result.stderr}")
+    _refresh_shell_icon_cache()
     return shortcut_path
 
 
