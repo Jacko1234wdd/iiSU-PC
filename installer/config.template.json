@@ -24,34 +24,5 @@
     "modifiers": ["ctrl", "alt"],
     "key": "x"
   },
-  "usb_passthrough": [],
-  "emulators": {
-    "org.dolphinemu": {
-      "exe_names": ["Dolphin.exe", "DolphinQt2.exe"],
-      "pre_args": ["-b"]
-    },
-    "com.github.stenzek.duckstation": {
-      "exe_names": ["duckstation-qt-x64-ReleaseLTCG.exe"],
-      "pre_args": ["-fullscreen"]
-    },
-    "info.cemu.cemu": {
-      "exe_names": ["Cemu.exe"],
-      "pre_args": ["-f"]
-    },
-    "org.citra.citra_emu": {
-      "exe_names": ["citra-qt.exe"],
-      "pre_args": ["-f"]
-    },
-    "org.azahar_emu.azahar": {
-      "exe_names": ["citra-qt.exe"],
-      "pre_args": ["-f"]
-    },
-    "org.ppsspp.ppsspp": {
-      "exe_names": ["PPSSPPWindows64.exe"],
-      "pre_args": ["--fullscreen"]
-    },
-    "com.retroarch": {
-      "by_extension": {}
-    }
-  }
+  "usb_passthrough": []
 }

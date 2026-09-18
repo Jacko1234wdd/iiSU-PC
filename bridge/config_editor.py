@@ -14,8 +14,10 @@ Stdlib only (tkinter), no extra installs.
 """
 
 import json
+import queue
 import subprocess
 import sys
+import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
@@ -26,7 +28,11 @@ from console_names import load_console_lookup, resolve_console_shortname
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from shared import theme
-from shared.theme import BG, ENTRY_KWARGS, GRADIENT_STOPS, GREEN, LISTBOX_KWARGS, PANEL_BG, PANEL_BG_HOVER, RED, TEXT, TEXT_DIM, FONT_BODY, FONT_TITLE, draw_gradient_bar
+from shared.theme import BG, ENTRY_KWARGS, GRADIENT_STOPS, GREEN, LISTBOX_KWARGS, PANEL_BG, PANEL_BG_HOVER, RED, TEXT, TEXT_DIM, FONT_BODY, FONT_MONO, FONT_TITLE, QueueWriter, draw_gradient_bar
+from shared.emulator_defaults import all_stub_packages
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "installer"))
+import stub_apk
 
 RESOLUTION_PRESETS = ["1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160"]
 REFRESH_RATE_PRESETS = ["60", "90", "120", "144", "165", "240"]
@@ -89,6 +95,93 @@ class EmulatorDialog(simpledialog.Dialog):
         exe_names = [s.strip() for s in self.exe_entry.get().split(",") if s.strip()]
         pre_args = [s.strip() for s in self.args_entry.get().split(",") if s.strip()]
         self.result_values = (prefix, exe_names, pre_args)
+
+
+class RedirectorInstallDialog(tk.Toplevel):
+    """Builds and installs a stub app for each of shared/emulator_defaults
+    .py's known packages into the running AVD, so iiSU's own
+    installed-package check resolves each console to something our
+    patched LaunchBridge recognizes (see that module's docstring for why
+    a stub is needed at all). The AVD needs to already be running --
+    Start it from the control panel first if this can't reach it."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Install Redirector Apps")
+        self.configure(bg=PANEL_BG)
+        self.geometry("560x420")
+        self.transient(parent)
+
+        self.log_queue: queue.Queue = queue.Queue()
+        self.running = False
+
+        tk.Label(
+            self, text="Installs a placeholder app for each of the emulators below into the\n"
+            "running AVD, purely so iiSU recognizes that console's emulator as\n"
+            "installed. The real launch is still handled by the PC-side emulator\n"
+            "configured in the Emulators tab -- these apps do nothing themselves.",
+            bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
+        ).pack(anchor="w", padx=16, pady=(16, 8))
+
+        self.replace_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            self, text="Replace apps already installed under these package names\n(only do this if you're sure it's an old redirector, not a real app)",
+            variable=self.replace_var,
+        ).pack(anchor="w", padx=16, pady=(0, 8))
+
+        self.log_text = tk.Text(self, state="disabled", wrap="word", font=FONT_MONO, bg="#0e0e10", fg="#c9c9ce", relief="flat", padx=8, pady=8, height=12)
+        self.log_text.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+
+        button_row = tk.Frame(self, bg=PANEL_BG)
+        button_row.pack(fill="x", padx=16, pady=(0, 16))
+        self.install_button = ttk.Button(button_row, text="Install All", style="Accent.TButton", command=self._start_install)
+        self.install_button.pack(side="left")
+        ttk.Button(button_row, text="Close", style="Ghost.TButton", command=self.destroy).pack(side="left", padx=(8, 0))
+
+        self.after(100, self._poll_log_queue)
+
+    def _append_log(self, text: str) -> None:
+        self.log_text.config(state="normal")
+        self.log_text.insert("end", text)
+        self.log_text.see("end")
+        self.log_text.config(state="disabled")
+
+    def _poll_log_queue(self) -> None:
+        try:
+            while True:
+                self._append_log(self.log_queue.get_nowait())
+        except queue.Empty:
+            pass
+        self.after(100, self._poll_log_queue)
+
+    def _start_install(self) -> None:
+        if self.running:
+            return
+        self.running = True
+        self.install_button.config(state="disabled")
+        threading.Thread(target=self._run_installs, args=(self.replace_var.get(),), daemon=True).start()
+
+    def _run_installs(self, replace_existing: bool) -> None:
+        writer = QueueWriter(self.log_queue)
+        devices = subprocess.run(["adb", "devices"], capture_output=True, text=True)
+        if not any(line.startswith("emulator-") and "device" in line for line in devices.stdout.splitlines()):
+            writer.write("No running AVD found -- start it from the control panel first, then try again.\n")
+            self.after(0, self._on_finished)
+            return
+
+        for package, label in all_stub_packages():
+            writer.write(f"{label} ({package})... ")
+            try:
+                outcome = stub_apk.build_and_install(package, label, replace_existing=replace_existing)
+                writer.write(f"{outcome}\n")
+            except Exception as e:
+                writer.write(f"failed ({e})\n")
+        writer.write("\nDone.\n")
+        self.after(0, self._on_finished)
+
+    def _on_finished(self) -> None:
+        self.running = False
+        self.install_button.config(state="normal")
 
 
 class SetupApp(tk.Tk):
@@ -262,6 +355,10 @@ class SetupApp(tk.Tk):
         ttk.Button(btn_row, text="Add...", style="Ghost.TButton", command=self._add_emulator).pack(side="left")
         ttk.Button(btn_row, text="Edit selected...", style="Ghost.TButton", command=self._edit_emulator).pack(side="left", padx=(8, 0))
         ttk.Button(btn_row, text="Remove selected", style="Ghost.TButton", command=self._remove_emulator).pack(side="left", padx=(8, 0))
+        ttk.Button(btn_row, text="Install Redirector Apps...", style="Ghost.TButton", command=self._open_redirector_dialog).pack(side="left", padx=(8, 0))
+
+    def _open_redirector_dialog(self) -> None:
+        RedirectorInstallDialog(self)
 
     def _add_emulator(self):
         dialog = EmulatorDialog(self, "Add emulator mapping")

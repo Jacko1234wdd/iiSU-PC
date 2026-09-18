@@ -33,11 +33,14 @@ Inside the VM, `Ctrl+Alt+Q` force-quits the current game and returns to iiSU; `C
 
 `installer/patch_iisu.py` decompiles your iiSU APK, redirects its ROM-launch code to a small injected class that sends the launch request to `bridge/launch_bridge.py` over a local socket, then rebuilds and signs it with a key generated just for your install. The bridge matches the requested game to a PC emulator (configured in `bridge/config.json`) and launches it directly on Windows.
 
+Before any of that can happen, though, iiSU needs to think a real emulator is installed for each console -- it checks for one of a few known Android package names before it'll treat a console as playable. Setup installs a placeholder "redirector" app for each one (`installer/stub_apk.py`, built from `shared/emulator_defaults.py`'s curated console list) -- it does nothing itself, since the patched launch never reaches it, but its presence is what makes iiSU offer that console at all. `config_editor.py`'s "Install Redirector Apps..." button re-runs this any time (e.g. after adding a console's emulator by hand).
+
 ## Project layout
 
 ```
 Setup.bat, iiSU-PC.bat     entry points -- launch the two GUIs below
 shared/theme.py            the dark/gradient look shared by both GUIs
+shared/emulator_defaults.py  curated console -> PC emulator mappings, and which need a redirector
 
 installer/
   setup_wizard.py          first-time setup, called by setup_gui.py and usable from the CLI
@@ -45,6 +48,8 @@ installer/
   sdk_bootstrap.py         downloads/installs the Android SDK and creates the AVD
   patch_iisu.py            decompiles, patches, rebuilds, and signs your iiSU APK
   smali_patch/             the injected LaunchBridge classes patch_iisu.py adds to iiSU
+  stub_apk.py              builds/installs the placeholder "redirector" apps (see below)
+  stub_apk_template/       the (identical, per-package-renamed) redirector app project
 
 bridge/
   control_panel.py         day-to-day GUI: status, Start/Stop, opens config_editor.py

@@ -175,6 +175,8 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
     if result.returncode != 0 or "Success" not in result.stdout:
         raise RuntimeError(f"adb install failed:\n{result.stdout}\n{result.stderr}")
 
+    install_default_redirectors()
+
     print("[setup] shutting the AVD back down (iiSU-PC.bat will bring it up properly from here on)...")
     subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True)
     deadline = time.time() + 15
@@ -211,7 +213,15 @@ def write_bridge_config(avd_name: str) -> None:
     fresh install (no config yet), or just patches avd_name/display into
     whatever's already there -- so re-running this against an existing,
     already-personalized setup (e.g. to rebuild a corrupted AVD) never
-    overwrites someone's real roms_dir/search_roots/emulators."""
+    overwrites someone's real roms_dir/search_roots/emulators.
+
+    The "emulators" map is seeded from shared/emulator_defaults.py the
+    same way, via setdefault: a brand-new config gets the full curated
+    set, but re-running this never overwrites emulator mappings someone
+    has since customized in config_editor.py."""
+    sys.path.insert(0, str(PROJECT_ROOT))
+    from shared.emulator_defaults import build_emulators_map
+
     config_path = BRIDGE_DIR / "config.json"
     if config_path.is_file():
         config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -219,7 +229,39 @@ def write_bridge_config(avd_name: str) -> None:
         config = json.loads((INSTALLER_DIR / "config.template.json").read_text(encoding="utf-8"))
     config["avd_name"] = avd_name
     config.setdefault("display", DEFAULT_DISPLAY)
+    config.setdefault("emulators", build_emulators_map())
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
+def install_default_redirectors() -> None:
+    """Installs a stub for every package shared/emulator_defaults.py maps
+    a PC emulator to (see that module for why a stub is needed at all).
+    Runs while the AVD is already up from installing iiSU, right before
+    it gets shut back down -- one boot instead of a second one just for
+    this. Each package is independent: one failing (or already having a
+    real, differently-signed app installed under that name, which this
+    deliberately does not overwrite -- see stub_apk.install_stub_apk)
+    doesn't stop the rest, since none of them are required for the
+    install as a whole to have succeeded."""
+    sys.path.insert(0, str(PROJECT_ROOT))
+    import stub_apk
+    from shared.emulator_defaults import all_stub_packages
+
+    stub_apk.preserve_build_tools(sdk_bootstrap.SDK_ROOT)
+    if not stub_apk.build_tools_available():
+        print("[setup] build-tools not available -- skipping default redirector apps")
+        return
+
+    print("[setup] installing default redirector apps (so iiSU recognizes each console's emulator)...")
+    for package, label in all_stub_packages():
+        try:
+            outcome = stub_apk.build_and_install(package, label)
+            if outcome == "conflict":
+                print(f"[setup]   {label}: a different app is already installed as {package} -- left it alone")
+            else:
+                print(f"[setup]   {label}: {outcome}")
+        except Exception as e:
+            print(f"[setup]   {label}: failed ({e})")
 
 
 def create_desktop_shortcut() -> None:
