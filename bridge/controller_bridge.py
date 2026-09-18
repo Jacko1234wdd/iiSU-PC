@@ -12,11 +12,22 @@ enumerate as DirectInput/HID on Windows, not XInput, unless something like
 Steam Input or DS4Windows remaps them to XInput -- those aren't covered
 here.
 
-Only forwards input while iiSU itself is what you'd be looking at (no game
-currently running via the bridge); once a game launches, the real PC
-emulator reads the same physical controller directly through Windows
-(XInput polling isn't exclusive, so this doesn't conflict with it), so
-there's nothing useful for this to send until you're back at iiSU.
+Only forwards menu-navigation input while iiSU itself is what you'd be
+looking at (no game currently running via the bridge); once a game
+launches, the real PC emulator reads the same physical controller directly
+through Windows (XInput polling isn't exclusive, so this doesn't conflict
+with it), so there's nothing useful for this to send until you're back at
+iiSU.
+
+Also watches for Back+Start held together for SHUTDOWN_HOLD_SECONDS on any
+pad, regardless of whether a game is running, and closes iiSU and shuts
+down the VM entirely when it sees that -- the same action as the
+shutdown_hotkey in config.json, but reachable without a keyboard. Back+
+Start (View+Menu on newer Xbox controllers) is the standard "recover to
+dashboard" chord on other consoles and isn't used for anything else here,
+and it's the one two-button combo guaranteed available through legacy
+XInput (the Guide/Xbox button itself is deliberately not exposed by
+XInputGetState).
 """
 
 import ctypes
@@ -70,6 +81,9 @@ TRIGGER_THRESHOLD = 128
 STICK_DEADZONE = 12000
 POLL_HZ = 60
 
+SHUTDOWN_CHORD = XINPUT_GAMEPAD_BACK | XINPUT_GAMEPAD_START
+SHUTDOWN_HOLD_SECONDS = 2.5
+
 
 class XinputGamepad(ctypes.Structure):
     _fields_ = [
@@ -113,14 +127,20 @@ def get_gamepad_state(slot: int) -> XinputGamepad | None:
 
 class ControllerBridge:
     """is_game_running: zero-arg callable returning True while a real PC
-    emulator is active, so this pauses instead of fighting for input."""
+    emulator is active, so menu-nav forwarding pauses instead of fighting
+    for input. on_shutdown: zero-arg callable that closes iiSU and shuts
+    down the VM, invoked once when the Back+Start chord is held long
+    enough (see module docstring)."""
 
-    def __init__(self, is_game_running):
+    def __init__(self, is_game_running, on_shutdown):
         self.is_game_running = is_game_running
+        self.on_shutdown = on_shutdown
         self._adb_shell: subprocess.Popen | None = None
         self._connected_slots: set[int] = set()
         self._held_since: dict[tuple[int, int], float] = {}
         self._last_repeat: dict[tuple[int, int], float] = {}
+        self._shutdown_chord_since: dict[int, float] = {}
+        self._shutdown_fired: set[int] = set()
 
     def _ensure_shell(self) -> None:
         if self._adb_shell is None or self._adb_shell.poll() is not None:
@@ -157,17 +177,18 @@ class ControllerBridge:
             pressed.add(KEYCODE_DPAD_RIGHT)
         return pressed
 
-    def _poll_slot(self, slot: int, now: float) -> None:
-        pad = get_gamepad_state(slot)
-        if pad is None:
-            if slot in self._connected_slots:
-                print(f"[controller] slot {slot} disconnected")
-                self._connected_slots.discard(slot)
+    def _check_shutdown_chord(self, slot: int, pad: XinputGamepad, now: float) -> None:
+        if pad.wButtons & SHUTDOWN_CHORD != SHUTDOWN_CHORD:
+            self._shutdown_chord_since.pop(slot, None)
+            self._shutdown_fired.discard(slot)
             return
-        if slot not in self._connected_slots:
-            print(f"[controller] slot {slot} connected (wired or Bluetooth, detected automatically)")
-            self._connected_slots.add(slot)
+        started = self._shutdown_chord_since.setdefault(slot, now)
+        if now - started >= SHUTDOWN_HOLD_SECONDS and slot not in self._shutdown_fired:
+            self._shutdown_fired.add(slot)
+            print(f"[controller] Back+Start held for {SHUTDOWN_HOLD_SECONDS:.1f}s -- closing iiSU and shutting down the VM")
+            self.on_shutdown()
 
+    def _forward_navigation(self, slot: int, pad: XinputGamepad, now: float) -> None:
         pressed = self._digital_buttons(pad)
 
         for key in [k for k in self._held_since if k[0] == slot and k[1] not in pressed]:
@@ -191,9 +212,29 @@ class ControllerBridge:
             print("[controller] XInput not available on this system; controller support disabled")
             return
         print("[controller] watching for Xbox-compatible controllers (wired or Bluetooth)")
+        print(f"[controller] hold Back+Start for {SHUTDOWN_HOLD_SECONDS:.0f}s on any pad to close iiSU and shut down the VM")
         while True:
-            if not self.is_game_running():
-                now = time.time()
-                for slot in range(4):
-                    self._poll_slot(slot, now)
+            now = time.time()
+            game_running = self.is_game_running()
+            for slot in range(4):
+                pad = get_gamepad_state(slot)
+                if pad is None:
+                    if slot in self._connected_slots:
+                        print(f"[controller] slot {slot} disconnected")
+                        self._connected_slots.discard(slot)
+                    self._shutdown_chord_since.pop(slot, None)
+                    self._shutdown_fired.discard(slot)
+                    continue
+                if slot not in self._connected_slots:
+                    print(f"[controller] slot {slot} connected (wired or Bluetooth, detected automatically)")
+                    self._connected_slots.add(slot)
+
+                # Checked regardless of game state -- this is a local
+                # "kill everything" action, not something forwarded into
+                # Android, so there's no reason to gate it on iiSU being
+                # the thing currently in focus.
+                self._check_shutdown_chord(slot, pad, now)
+
+                if not game_running:
+                    self._forward_navigation(slot, pad, now)
             time.sleep(1 / POLL_HZ)

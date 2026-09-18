@@ -397,7 +397,7 @@ def main() -> None:
 
     threading.Thread(target=hotkey_listener, args=(config,), daemon=True).start()
 
-    threading.Thread(target=ControllerBridge(is_game_running).run, daemon=True).start()
+    threading.Thread(target=ControllerBridge(is_game_running, shutdown_everything).run, daemon=True).start()
 
     # Launch iiSU directly rather than leaving the stock Android home
     # screen showing, whether this is a fresh boot or the bridge is being
