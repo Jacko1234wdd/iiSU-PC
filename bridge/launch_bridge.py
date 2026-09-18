@@ -190,11 +190,24 @@ def launch_iisu(config: dict) -> None:
     for _ in range(20):
         result = subprocess.run(["adb", "shell", "am", "start", "-n", component], capture_output=True, text=True)
         if result.returncode == 0 and "Error" not in result.stdout:
+            set_volume_max()
             return
         time.sleep(3)
     print(f"[bridge] could not launch iiSU ({component}):")
     if result is not None:
         print(f"    {result.stdout.strip()}\n    {result.stderr.strip()}")
+
+
+def set_volume_max() -> None:
+    """A fresh boot comes up at whatever media volume level the system
+    image defaults to (usually well below max) -- silent enough that
+    anything iiSU itself plays (UI sounds, trailers) needs a manual
+    volume raise inside the VM on every single boot otherwise. Repeated
+    VOLUME_UP keyevents clamp at the device's actual max regardless of
+    AOSP vs OEM MAX_VOLUME differences, so this doesn't need to know the
+    exact volume index -- one `adb shell input keyevent` call with the
+    keycode repeated is enough, no need for 20 separate subprocess calls."""
+    subprocess.run(["adb", "shell", "input", "keyevent"] + ["24"] * 20, capture_output=True, text=True)
 
 
 def show_iisu_window(config: dict) -> None:
