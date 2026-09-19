@@ -39,6 +39,7 @@ import json
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from console_names import load_console_lookup, resolve_console_shortname
@@ -102,6 +103,24 @@ def read_avd_fingerprint() -> str | None:
     return result.stdout.strip() or None
 
 
+def wait_for_external_storage(timeout: float = 60.0) -> bool:
+    """adb becoming reachable only means the AVD booted far enough to
+    accept a connection -- it doesn't mean /sdcard's own storage stack has
+    finished mounting yet, the same class of post-boot race launch_iisu()
+    already retries around for the package manager. Calling this too
+    early on a genuinely fresh cold boot fails every mkdir under
+    AVD_ROMS_ROOT with "No such file or directory" since /sdcard itself
+    isn't there yet; an already-running AVD (the common case -- this runs
+    on every start, not just the first) has always been up long enough
+    for this to return immediately."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if adb("shell", "test -d /sdcard", check=False).returncode == 0:
+            return True
+        time.sleep(2)
+    return False
+
+
 def main() -> None:
     with open(CONFIG_PATH, encoding="utf-8") as f:
         config = json.load(f)
@@ -109,6 +128,10 @@ def main() -> None:
     roms_dir = Path(config["roms_dir"])
     if not roms_dir.is_dir():
         print(f"roms_dir '{roms_dir}' does not exist or isn't reachable.")
+        sys.exit(1)
+
+    if not wait_for_external_storage():
+        print("The AVD's storage never became available -- skipping this sync, the next start will retry.")
         sys.exit(1)
 
     exact, by_compact = load_console_lookup()
