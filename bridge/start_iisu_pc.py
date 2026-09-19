@@ -157,24 +157,40 @@ def build_usb_passthrough_args(usb_passthrough: list[dict]) -> list[str]:
     return args
 
 
-def _launch_once(emulator_exe: Path, avd_name: str, env: dict, usb_passthrough: list[dict]) -> int | None:
-    """One launch attempt. Logged to a real file, not a pipe: a pipe's write
-    end would get inherited by this long-lived process and never see EOF
-    (the same bug that made `android emulator start` hang), but a file has
-    no such problem and still lets us show the real error on failure."""
-    log_file = open(EMULATOR_LOG_PATH, "wb")
-    try:
+def _launch_once(emulator_exe: Path, avd_name: str, env: dict, usb_passthrough: list[dict], debug_console: bool) -> int | None:
+    """One launch attempt. Logged to a real file, not a pipe, by default: a
+    pipe's write end would get inherited by this long-lived process and
+    never see EOF (the same bug that made `android emulator start` hang),
+    but a file has no such problem and still lets us show the real error
+    on failure.
+
+    debug_console (config.json's "debug_show_console_windows") swaps that
+    for a real, visible console instead -- for watching emulator.exe's
+    (and whatever it spawns internally, e.g. netsimd) own live output
+    while troubleshooting something a static log doesn't make obvious.
+    Trades away emulator.log for that run, since a process can't
+    sensibly have both a console showing its output live and that same
+    output redirected to a file."""
+    if debug_console:
         process = subprocess.Popen(
             [str(emulator_exe), "-avd", avd_name, "-no-snapshot", *build_usb_passthrough_args(usb_passthrough)],
-            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
-            stdin=subprocess.DEVNULL,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            close_fds=True,
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
             env=env,
         )
-    finally:
-        log_file.close()
+    else:
+        log_file = open(EMULATOR_LOG_PATH, "wb")
+        try:
+            process = subprocess.Popen(
+                [str(emulator_exe), "-avd", avd_name, "-no-snapshot", *build_usb_passthrough_args(usb_passthrough)],
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                stdin=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
+                env=env,
+            )
+        finally:
+            log_file.close()
 
     deadline = time.time() + AVD_BOOT_TIMEOUT
     while time.time() < deadline:
@@ -182,17 +198,20 @@ def _launch_once(emulator_exe: Path, avd_name: str, env: dict, usb_passthrough: 
             return process.pid
         if process.poll() is not None:
             print(f"[start] emulator.exe exited early (code {process.returncode}) before the AVD came up.")
-            print(f"[start] see {EMULATOR_LOG_PATH} for details. Last lines:")
-            tail = EMULATOR_LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()[-20:]
-            for line in tail:
-                print(f"    {line}")
+            if debug_console:
+                print("[start] its console window has the output (nothing was logged to a file this run).")
+            else:
+                print(f"[start] see {EMULATOR_LOG_PATH} for details. Last lines:")
+                tail = EMULATOR_LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()[-20:]
+                for line in tail:
+                    print(f"    {line}")
             return None
         time.sleep(2)
     print(f"[start] {avd_name} did not report ready within {AVD_BOOT_TIMEOUT}s.")
     return None
 
 
-def start_avd(avd_name: str, usb_passthrough: list[dict]) -> int | None:
+def start_avd(avd_name: str, usb_passthrough: list[dict], debug_console: bool = False) -> int | None:
     """Launches the AVD directly (bypassing the buggy `android emulator
     start` wrapper) and returns its PID once it's confirmed running, so the
     stop script can find it reliably even if it later gets reparented.
@@ -225,7 +244,7 @@ def start_avd(avd_name: str, usb_passthrough: list[dict]) -> int | None:
     for attempt in range(1, MAX_LAUNCH_ATTEMPTS + 1):
         clear_stale_locks(avd_dir)
         disable_quickboot_autosave(avd_dir)
-        pid = _launch_once(emulator_exe, avd_name, env, usb_passthrough)
+        pid = _launch_once(emulator_exe, avd_name, env, usb_passthrough, debug_console)
         if pid is not None:
             return pid
         diagnose_system_image(avd_dir, env_overrides["ANDROID_SDK_ROOT"])
@@ -261,13 +280,14 @@ def main() -> None:
         sys.exit(1)
     avd_name = config["avd_name"]
     port = config["bridge_port"]
+    debug_console = config.get("debug_show_console_windows", False)
     state = {"avd_name": avd_name}
 
     if is_avd_running(avd_name):
         print(f"[start] {avd_name} is already running.")
     else:
         print(f"[start] Starting {avd_name}, this can take a minute...")
-        pid = start_avd(avd_name, config.get("usb_passthrough", []))
+        pid = start_avd(avd_name, config.get("usb_passthrough", []), debug_console)
         if pid is None:
             sys.exit(1)
         state["emulator_pid"] = pid
@@ -279,20 +299,28 @@ def main() -> None:
     if is_port_open(port):
         print(f"[start] Bridge is already running on port {port}.")
     else:
-        print(f"[start] Starting the launch bridge (logging to {BRIDGE_LOG_PATH.name})...")
-        bridge_log_file = open(BRIDGE_LOG_PATH, "wb")
-        try:
+        if debug_console:
+            print("[start] Starting the launch bridge in a visible console (debug_show_console_windows is on)...")
             bridge_process = subprocess.Popen(
                 [sys.executable, str(BRIDGE_SCRIPT)],
-                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
-                stdin=subprocess.DEVNULL,
-                stdout=bridge_log_file,
-                stderr=subprocess.STDOUT,
-                close_fds=True,
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
                 cwd=str(BRIDGE_SCRIPT.parent),
             )
-        finally:
-            bridge_log_file.close()
+        else:
+            print(f"[start] Starting the launch bridge (logging to {BRIDGE_LOG_PATH.name})...")
+            bridge_log_file = open(BRIDGE_LOG_PATH, "wb")
+            try:
+                bridge_process = subprocess.Popen(
+                    [sys.executable, str(BRIDGE_SCRIPT)],
+                    creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                    stdin=subprocess.DEVNULL,
+                    stdout=bridge_log_file,
+                    stderr=subprocess.STDOUT,
+                    close_fds=True,
+                    cwd=str(BRIDGE_SCRIPT.parent),
+                )
+            finally:
+                bridge_log_file.close()
         state["bridge_pid"] = bridge_process.pid
         # Give it a moment to bind before reporting success. Generous on
         # purpose: launch_iisu() inside the bridge retries `am start` for up
@@ -305,6 +333,8 @@ def main() -> None:
             time.sleep(0.5)
         if is_port_open(port):
             print("[start] Bridge is up.")
+        elif debug_console:
+            print("[start] Bridge didn't come up in time -- check its console window for errors.")
         else:
             print(f"[start] Bridge didn't come up in time -- check {BRIDGE_LOG_PATH.name} for errors.")
 

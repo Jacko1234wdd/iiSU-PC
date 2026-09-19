@@ -24,5 +24,6 @@
     "modifiers": ["ctrl", "alt"],
     "key": "x"
   },
-  "usb_passthrough": []
+  "usb_passthrough": [],
+  "debug_show_console_windows": false
 }

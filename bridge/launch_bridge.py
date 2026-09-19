@@ -361,27 +361,40 @@ def shutdown_everything() -> None:
     stop_iisu_pc.py for the graceful AVD/bridge teardown and exits this
     process. Runs as a separate process because this one is about to exit
     itself, and because stop_iisu_pc.py needs to be able to kill this
-    bridge process by PID. Detached and logged to stop.log rather than
-    given a visible console -- same reasoning as the bridge's own log in
-    start_iisu_pc.py, a console window for a script that just prints a
-    handful of status lines and exits is pure clutter."""
+    bridge process by PID. Detached and logged to stop.log by default
+    rather than given a visible console -- a console window for a script
+    that just prints a handful of status lines and exits is pure clutter
+    -- unless config.json's "debug_show_console_windows" says otherwise."""
     with current_process_lock:
         proc = current_process
     if proc is not None and proc.poll() is None:
         proc.terminate()
-    stop_log_file = open(STOP_LOG_PATH, "wb")
+
     try:
+        debug_console = load_config().get("debug_show_console_windows", False)
+    except ConfigMissingError:
+        debug_console = False
+
+    if debug_console:
         subprocess.Popen(
             [sys.executable, str(STOP_SCRIPT)],
-            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
-            stdin=subprocess.DEVNULL,
-            stdout=stop_log_file,
-            stderr=subprocess.STDOUT,
-            close_fds=True,
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
             cwd=str(STOP_SCRIPT.parent),
         )
-    finally:
-        stop_log_file.close()
+    else:
+        stop_log_file = open(STOP_LOG_PATH, "wb")
+        try:
+            subprocess.Popen(
+                [sys.executable, str(STOP_SCRIPT)],
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                stdin=subprocess.DEVNULL,
+                stdout=stop_log_file,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
+                cwd=str(STOP_SCRIPT.parent),
+            )
+        finally:
+            stop_log_file.close()
     os._exit(0)
 
 

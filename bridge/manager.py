@@ -823,7 +823,20 @@ class Manager(tk.Tk):
             "directory, search folders, and emulator mappings apply on the very next\n"
             "game launch, no restart needed).",
             bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
-        ).grid(row=11, column=0, sticky="w", padx=24, pady=(8, 16))
+        ).grid(row=11, column=0, sticky="w", padx=24, pady=(8, 8))
+
+        self.debug_console_var = tk.BooleanVar(value=self.config_data.get("debug_show_console_windows", False))
+        ttk.Checkbutton(
+            body, text="Show console windows for the AVD and bridge (debugging)", variable=self.debug_console_var
+        ).grid(row=12, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 4))
+        tk.Label(
+            body,
+            text="Off by default: the AVD, bridge, and shutdown-hotkey teardown all run without a visible\n"
+            "console, logging to emulator.log/bridge.log/stop.log instead. Turn this on to watch their\n"
+            "live output directly instead -- trades away that run's log file, since a process can't\n"
+            "sensibly have both. Takes effect on the next Start.",
+            bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
+        ).grid(row=13, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 16))
 
     def _build_hotkey_editor(self, parent, row: int, title: str, initial: dict) -> dict:
         tk.Label(parent, text=title, bg=BG, fg=TEXT, font=FONT_BODY).grid(row=row, column=0, columnspan=2, sticky="w", padx=24, pady=(4, 2))
@@ -917,6 +930,8 @@ class Manager(tk.Tk):
             "display": display,
             "quit_hotkey": self._read_hotkey(self.quit_hotkey_vars, default_key="q"),
             "shutdown_hotkey": self._read_hotkey(self.shutdown_hotkey_vars, default_key="x"),
+            "usb_passthrough": self.config_data.get("usb_passthrough", []),
+            "debug_show_console_windows": self.debug_console_var.get(),
             "emulators": emulators,
         }
         save_config(self.config_data)
