@@ -88,6 +88,31 @@ def require_java() -> None:
         raise RuntimeError("`keytool` was not found on PATH (it ships with any JDK) -- check your Java install includes it.")
 
 
+def ensure_pillow() -> None:
+    """Pillow backs two purely cosmetic features -- the desktop shortcut's
+    real extracted icon (create_shortcut.py) and the Manager's Credits
+    page avatars (shared/avatars.py) -- both of which already degrade
+    gracefully without it (a generic icon, a plain colored circle). That's
+    a reasonable fallback for something genuinely unavailable, but not a
+    reason to make it the default experience when a one-time `pip install`
+    fixes it for good. Never fatal to setup: a failed install here just
+    means those two features fall back exactly like they already do."""
+    try:
+        import PIL  # noqa: F401
+        return
+    except ImportError:
+        pass
+    print("[setup] Pillow isn't installed (used for the desktop shortcut's real icon and the")
+    print("[setup] Manager's Credits page avatars) -- installing it now...")
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--quiet", "pillow"], capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        print("[setup] Pillow installed.")
+    else:
+        print(f"[setup] couldn't install Pillow automatically -- continuing without it ({result.stderr.strip()[:200]})")
+
+
 def ensure_keystore() -> tuple[Path, str]:
     """Generates a fresh, locally-unique signing key on first run -- each
     install of this installer gets its own, rather than everyone who runs
@@ -353,6 +378,7 @@ def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None =
     print("=== iiSU-PC first-time setup ===\n")
     stage(0)
     require_java()
+    ensure_pillow()
     print(f"[setup] using {apk_path.name} as the source APK")
     validate_iisu_apk(apk_path)
     check_disk_space()
