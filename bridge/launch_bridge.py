@@ -34,6 +34,7 @@ apply_display.py and manager.py. One Python stdlib script, no dependencies.
 """
 
 import ctypes
+import io
 import json
 import os
 import re
@@ -42,6 +43,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
+import zipfile
 from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import unquote
@@ -64,7 +67,12 @@ from winapi import (
 )
 
 STOP_SCRIPT = Path(__file__).parent / "stop_iisu_pc.py"
+STOP_LOG_PATH = Path(__file__).parent / "stop.log"
 PATH_CACHE_PATH = Path(__file__).parent / ".path_cache.json"
+LIBRETRO_CORE_URL = "https://buildbot.libretro.com/nightly/windows/x86_64/latest/{core_dll}.zip"
+
+DETACHED_PROCESS = 0x00000008
+CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 DEFAULT_IISU_COMPONENT = "com.iisulauncher/com.iisulauncher.launcher.StartupSafeModeActivity"
 
@@ -165,33 +173,93 @@ def find_emulator_for_package(package: str, emulators: dict, rom_filename: str |
     instead a "by_extension" map, normally resolved by the ROM's own file
     extension to the real dedicated PC emulator for that system.
 
-    android_core (the intent's LIBRETRO extra, when present) takes priority
-    over that extension guess whenever it resolves to a known Windows core
-    -- it's the *actual* core iiSU/RetroArch decided to launch with, which
-    can legitimately differ from this project's own curated default (e.g.
-    a .zip-packaged ROM has no extension the curated map would recognize
-    at all, or the console's default core has since been changed on the
-    Android side). The exe_names/pre_args *shape* still comes from an
-    existing by_extension entry -- only the resolved core filename is
-    substituted in -- so config.json stays the source of truth for how
-    RetroArch itself gets invoked, not a hardcoded literal here."""
+    A ROM extension that already resolves to a dedicated standalone exe
+    (PSX/Dreamcast, via RETROARCH_SAFETY_NET_EXTENSIONS -- recognizable
+    here by NOT being a plain "retroarch.exe" entry) wins outright,
+    android_core or not: iiSU lists its own bundled RetroArch core as the
+    *first*-priority candidate for both of those consoles even when a
+    dedicated standalone emulator is installed and selected, so trusting
+    android_core there would launch RetroArch-with-a-core instead of the
+    real standalone emulator this project already has a PC-side install
+    for -- confirmed live: a Dreamcast .gdi launched com.retroarch with
+    LIBRETRO=flycast_libretro_android.so even with Flycast picked in iiSU.
+    Running the real standalone emulator instead also sidesteps ever
+    needing that RetroArch core installed at all for these two consoles.
+
+    Failing that, android_core (the intent's LIBRETRO extra, when present)
+    takes priority over the extension guess whenever it resolves to a known
+    Windows core -- it's the *actual* core iiSU/RetroArch decided to launch
+    with, which can legitimately differ from this project's own curated
+    default (e.g. a .zip-packaged ROM has no extension the curated map
+    would recognize at all, or the console's default core has since been
+    changed on the Android side). The exe_names/pre_args *shape* still
+    comes from an existing by_extension entry -- only the resolved core
+    filename is substituted in -- so config.json stays the source of truth
+    for how RetroArch itself gets invoked, not a hardcoded literal here."""
     for prefix, profile in emulators.items():
         if not package.startswith(prefix):
             continue
         if "by_extension" in profile:
             by_ext = profile["by_extension"]
+            ext = Path(rom_filename).suffix.lower() if rom_filename else None
+
+            safety_net_entry = by_ext.get(ext) if ext else None
+            if safety_net_entry and safety_net_entry.get("exe_names") != ["retroarch.exe"]:
+                return safety_net_entry
+
             if android_core:
                 core_dll = retroarch_core_dll_for_android_core(android_core)
                 template = next((e for e in by_ext.values() if "-L" in e.get("pre_args", [])), None)
                 if core_dll and template:
                     pre_args = [f"cores/{core_dll}" if arg.startswith("cores/") else arg for arg in template["pre_args"]]
                     return {"exe_names": template["exe_names"], "pre_args": pre_args}
-            if rom_filename is None:
-                return None
-            ext = Path(rom_filename).suffix.lower()
-            return by_ext.get(ext)
+
+            return by_ext.get(ext) if ext else None
         return profile
     return None
+
+
+def core_dll_from_pre_args(pre_args: list[str]) -> str | None:
+    for arg in pre_args:
+        if arg.startswith("cores/") or arg.startswith("cores\\"):
+            return Path(arg).name
+    return None
+
+
+def ensure_retroarch_core(retroarch_dir: Path, core_dll: str) -> bool:
+    """RetroArch loads its core list from disk, not from anything iiSU or
+    this bridge tracks -- a core this project's own config.json expects
+    (e.g. fceumm_libretro.dll for NES) can easily not actually be there if
+    it was never downloaded through RetroArch's own Online Updater. RetroArch
+    doesn't error visibly when that happens: it just fails to load the core
+    and exits straight back to iiSU, which from the PC side looks
+    indistinguishable from nothing happening at all. Downloads the missing
+    core from libretro's own official nightly buildbot (the same binaries
+    RetroArch's in-app updater itself pulls from) instead of leaving that
+    silent failure to happen. Returns True if the core is present by the
+    time this returns (already there, or freshly downloaded), False if it
+    couldn't be obtained -- the caller still attempts the launch either way,
+    since a download failure here shouldn't be worse than today's silent
+    RetroArch exit."""
+    core_path = retroarch_dir / "cores" / core_dll
+    if core_path.is_file():
+        return True
+
+    url = LIBRETRO_CORE_URL.format(core_dll=core_dll)
+    print(f"[bridge] {core_dll} isn't installed -- downloading it from the libretro buildbot...")
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            zip_bytes = resp.read()
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+            data = z.read(core_dll)
+    except Exception as e:
+        print(f"[bridge] couldn't download {core_dll} ({e}) -- the game launch will likely fail")
+        return False
+
+    core_path.parent.mkdir(parents=True, exist_ok=True)
+    core_path.write_bytes(data)
+    print(f"[bridge] installed {core_dll}")
+    return True
 
 
 def launch_iisu(config: dict) -> None:
@@ -293,16 +361,27 @@ def shutdown_everything() -> None:
     stop_iisu_pc.py for the graceful AVD/bridge teardown and exits this
     process. Runs as a separate process because this one is about to exit
     itself, and because stop_iisu_pc.py needs to be able to kill this
-    bridge process by PID."""
+    bridge process by PID. Detached and logged to stop.log rather than
+    given a visible console -- same reasoning as the bridge's own log in
+    start_iisu_pc.py, a console window for a script that just prints a
+    handful of status lines and exits is pure clutter."""
     with current_process_lock:
         proc = current_process
     if proc is not None and proc.poll() is None:
         proc.terminate()
-    subprocess.Popen(
-        [sys.executable, str(STOP_SCRIPT)],
-        creationflags=subprocess.CREATE_NEW_CONSOLE,
-        cwd=str(STOP_SCRIPT.parent),
-    )
+    stop_log_file = open(STOP_LOG_PATH, "wb")
+    try:
+        subprocess.Popen(
+            [sys.executable, str(STOP_SCRIPT)],
+            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+            stdin=subprocess.DEVNULL,
+            stdout=stop_log_file,
+            stderr=subprocess.STDOUT,
+            close_fds=True,
+            cwd=str(STOP_SCRIPT.parent),
+        )
+    finally:
+        stop_log_file.close()
     os._exit(0)
 
 
@@ -413,6 +492,10 @@ def handle_request(raw_intent: str) -> None:
             print(f"[bridge] rom '{rom_filename}' not found under {roms_dir}")
 
     save_path_cache(path_cache)
+
+    core_dll = core_dll_from_pre_args(profile["pre_args"])
+    if core_dll:
+        ensure_retroarch_core(executable.parent, core_dll)
 
     args = [str(executable), *profile["pre_args"]]
     if rom_path:
