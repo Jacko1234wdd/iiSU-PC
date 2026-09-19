@@ -57,7 +57,7 @@ from bridge_config import ConfigMissingError, load_config
 from controller_bridge import ControllerBridge
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from shared.emulator_defaults import retroarch_core_dll_for_android_core
+from shared.emulator_defaults import all_emulator_exe_names, retroarch_core_dll_for_android_core
 from winapi import (
     SW_MINIMIZE,
     SW_RESTORE,
@@ -264,6 +264,18 @@ def ensure_retroarch_core(retroarch_dir: Path, core_dll: str) -> bool:
     core_path.write_bytes(data)
     print(f"[bridge] installed {core_dll}")
     return True
+
+
+def friendly_emulator_name(executable: Path) -> str:
+    """Human-readable name for the handoff overlay's status line (e.g.
+    "Waiting on DuckStation..." instead of "Waiting on duckstation-qt-x64-
+    ReleaseLTCG.exe..."). Falls back to the executable's own filename --
+    still readable, just less polished -- for anything not in this
+    project's curated list, e.g. some other RetroArch-compatible fork."""
+    for app_label, exe_names in all_emulator_exe_names():
+        if executable.name in exe_names:
+            return app_label
+    return executable.stem
 
 
 def launch_iisu(config: dict) -> None:
@@ -524,7 +536,7 @@ def handle_request(raw_intent: str) -> None:
     # windows is on, since a fullscreen overlay would just hide the
     # console windows that setting exists to show.
     show_overlay = not config.get("debug_show_console_windows", False)
-    overlay = boot_overlay.show() if show_overlay else None
+    overlay = boot_overlay.show(f"Waiting on {friendly_emulator_name(executable)}...") if show_overlay else None
     try:
         iisu_hwnd = find_window_by_title(config["iisu_window_title"])
         if iisu_hwnd is not None:

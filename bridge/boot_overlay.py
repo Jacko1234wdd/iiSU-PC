@@ -17,45 +17,143 @@ background thread of manager.py's own long-lived Tk app. Tcl/Tk's global
 state isn't built for a second Tk root from a thread that isn't already
 running the existing one's mainloop; a wholly separate OS process
 sidesteps that class of problem entirely.
+
+The title uses Bahnschrift SemiBold (bundled with Windows 10+) rather than
+this project's usual Segoe UI -- a blockier, more technical/console-ish
+face that echoes iiSU's own branding without using any of iiSU's actual
+font files, which (like its icons) are its own copyrighted assets and not
+ours to include.
 """
 
+import random
 import subprocess
 
-_OVERLAY_SCRIPT = r"""
+# A random one of these accompanies the real context line every time the
+# overlay shows -- some genuine-sounding, some not, same as any loading
+# screen's flavor text. Purely cosmetic: nothing here reflects anything
+# actually happening.
+_FLAVOR_LINES = [
+    "Reticulating splines...",
+    "Charging the flux capacitor...",
+    "Waking up the Android...",
+    "Untangling controller cables...",
+    "Asking nicely for more RAM...",
+    "Feeding the hamsters...",
+    "Aligning the pixels...",
+    "Negotiating with the GPU...",
+    "Warming up the emulator...",
+    "Counting to infinity (almost there)...",
+    "Polishing the loading bar...",
+    "Convincing Windows this is normal...",
+    "Summoning the boot animation...",
+    "Downloading more RAM...",
+    "Dusting off old save states...",
+    "Herding packets...",
+    "Locating the any key...",
+    "Calibrating the flux...",
+    "Spinning up the virtual disc drive...",
+    "Reading the manual (never)...",
+]
+
+# %CONTEXT%/%FLAVOR% are plain string substitutions, not PowerShell
+# interpolation -- .format()/f-strings would collide with the script's own
+# literal { } (script blocks, hashtables), so this is a dumb find/replace
+# instead.
+_OVERLAY_SCRIPT_TEMPLATE = r"""
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+
 $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$accent = [System.Drawing.Color]::FromArgb(94, 132, 255)
+$flavorColor = [System.Drawing.Color]::FromArgb(120, 120, 128)
+$trackColor = [System.Drawing.Color]::FromArgb(40, 40, 44)
+$centerX = [int]($bounds.Width / 2)
+$centerY = [int]($bounds.Height / 2)
+
 $form = New-Object System.Windows.Forms.Form
 $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
-# WindowState=Maximized on a borderless form is unreliable (a known
-# WinForms quirk -- it can maximize against stale/default bounds instead
-# of the real screen), so this sets the exact screen rectangle directly
-# instead of asking the form to guess it.
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
 $form.Location = New-Object System.Drawing.Point($bounds.X, $bounds.Y)
 $form.Size = New-Object System.Drawing.Size($bounds.Width, $bounds.Height)
 $form.TopMost = $true
 $form.BackColor = [System.Drawing.Color]::Black
 $form.Cursor = [System.Windows.Forms.Cursors]::None
-$label = New-Object System.Windows.Forms.Label
-$label.Text = "iiSU-PC"
-$label.ForeColor = [System.Drawing.Color]::FromArgb(90, 90, 96)
-$label.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 20)
-$label.Dock = [System.Windows.Forms.DockStyle]::Fill
-$label.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
-$form.Controls.Add($label)
+
+$titleFont = New-Object System.Drawing.Font("Bahnschrift SemiBold", 32)
+$contextFont = New-Object System.Drawing.Font("Segoe UI Semibold", 14)
+$flavorFont = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Italic)
+
+$title = New-Object System.Windows.Forms.Label
+$title.Text = "iiSU-PC"
+$title.ForeColor = $accent
+$title.Font = $titleFont
+$title.AutoSize = $true
+$form.Controls.Add($title)
+$title.Location = New-Object System.Drawing.Point(($centerX - [int]($title.PreferredWidth / 2)), ($centerY - 100))
+
+$contextLabel = New-Object System.Windows.Forms.Label
+$contextLabel.Text = "%CONTEXT%"
+$contextLabel.ForeColor = [System.Drawing.Color]::White
+$contextLabel.Font = $contextFont
+$contextLabel.AutoSize = $true
+$form.Controls.Add($contextLabel)
+$contextLabel.Location = New-Object System.Drawing.Point(($centerX - [int]($contextLabel.PreferredWidth / 2)), ($centerY - 36))
+
+$barWidth = 320
+$barHeight = 4
+$fillWidth = 90
+$track = New-Object System.Windows.Forms.Panel
+$track.Size = New-Object System.Drawing.Size($barWidth, $barHeight)
+$track.Location = New-Object System.Drawing.Point(($centerX - [int]($barWidth / 2)), ($centerY + 4))
+$track.BackColor = $trackColor
+$form.Controls.Add($track)
+
+$fill = New-Object System.Windows.Forms.Panel
+$fill.Size = New-Object System.Drawing.Size($fillWidth, $barHeight)
+$fill.BackColor = $accent
+$track.Controls.Add($fill)
+
+$flavorLabel = New-Object System.Windows.Forms.Label
+$flavorLabel.Text = "%FLAVOR%"
+$flavorLabel.ForeColor = $flavorColor
+$flavorLabel.Font = $flavorFont
+$flavorLabel.AutoSize = $true
+$form.Controls.Add($flavorLabel)
+$flavorLabel.Location = New-Object System.Drawing.Point(($centerX - [int]($flavorLabel.PreferredWidth / 2)), ($centerY + 26))
+
+$script:barDirection = 1
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 12
+$timer.Add_Tick({
+    $maxX = $track.Width - $fill.Width
+    $newX = $fill.Left + (3 * $script:barDirection)
+    if ($newX -le 0) { $newX = 0; $script:barDirection = 1 }
+    elseif ($newX -ge $maxX) { $newX = $maxX; $script:barDirection = -1 }
+    $fill.Left = $newX
+})
+$timer.Start()
+
 $form.Add_Shown({ $form.Activate() })
 [System.Windows.Forms.Application]::Run($form)
 """
 
 
-def show() -> subprocess.Popen | None:
+def show(context: str) -> subprocess.Popen | None:
     """Best-effort: returns None instead of raising if PowerShell/WinForms
     aren't available for any reason -- a missing overlay is a cosmetic
-    regression, never a reason to fail an actual start or game launch."""
+    regression, never a reason to fail an actual start or game launch.
+
+    context is a short status line (e.g. "Booting iiSU-PC..." or
+    "Waiting on DuckStation...") describing what's actually happening;
+    paired with a randomly-picked, purely-for-fun line underneath."""
+    script = (
+        _OVERLAY_SCRIPT_TEMPLATE
+        .replace("%CONTEXT%", _escape_for_powershell_string(context))
+        .replace("%FLAVOR%", _escape_for_powershell_string(random.choice(_FLAVOR_LINES)))
+    )
     try:
         return subprocess.Popen(
-            ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", _OVERLAY_SCRIPT],
+            ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", script],
             creationflags=subprocess.CREATE_NO_WINDOW,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -63,6 +161,19 @@ def show() -> subprocess.Popen | None:
         )
     except OSError:
         return None
+
+
+def _escape_for_powershell_string(text: str) -> str:
+    """text lands inside a PowerShell double-quoted string literal, which
+    (unlike a single-quoted one) interpolates $variables and treats
+    backtick as an escape character -- neutralizing both, then doubling
+    embedded double-quotes, makes this safe regardless of what the caller
+    passes, even though today it's always our own hardcoded flavor lines
+    or a short status string built from a known emulator name."""
+    text = text.replace("`", "``")
+    text = text.replace("$", "`$")
+    text = text.replace('"', '""')
+    return text
 
 
 def close(overlay: subprocess.Popen | None) -> None:

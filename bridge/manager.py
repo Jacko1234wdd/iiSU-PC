@@ -832,9 +832,11 @@ class Manager(tk.Tk):
         tk.Label(
             body,
             text="Off by default: the AVD, bridge, and shutdown-hotkey teardown all run without a visible\n"
-            "console, logging to emulator.log/bridge.log/stop.log instead. Turn this on to watch their\n"
-            "live output directly instead -- trades away that run's log file, since a process can't\n"
-            "sensibly have both. Takes effect on the next Start.",
+            "console, logging to emulator.log/bridge.log/stop.log instead, and the fullscreen loading\n"
+            "overlay covers the AVD-boot/emulator-handoff gaps. Turn this on to watch their live output\n"
+            "directly instead -- also turns the overlay off, since it would just hide those consoles.\n"
+            "Trades away that run's log file, since a process can't sensibly have both. Takes effect on\n"
+            "the next Start.",
             bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
         ).grid(row=13, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 16))
 

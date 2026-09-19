@@ -295,7 +295,7 @@ def main() -> None:
     # to cover) and when debug_console is on (it would just hide the
     # console windows that setting exists to show).
     show_overlay = not is_avd_running(avd_name) and not debug_console
-    overlay = boot_overlay.show() if show_overlay else None
+    overlay = boot_overlay.show("Booting iiSU-PC, please wait...") if show_overlay else None
     try:
         _run_start_sequence(config, avd_name, port, debug_console, state)
     finally:
