@@ -687,6 +687,12 @@ class OnboardingWizard(tk.Tk):
                 self.content, text=f"•  {line}", font=FONT_BODY, bg=PANEL_BG, fg=TEXT, justify="left", wraplength=660, anchor="w"
             ).pack(anchor="w", pady=2)
 
+        missing_warning = self._missing_emulators_warning()
+        if missing_warning:
+            tk.Label(
+                self.content, text=missing_warning, font=FONT_BODY, bg=PANEL_BG, fg=RED, justify="left", wraplength=660, anchor="w"
+            ).pack(anchor="w", pady=(10, 0))
+
         self.finish_status_label = tk.Label(self.content, text="", font=FONT_BODY, bg=PANEL_BG, fg=TEXT_DIM, justify="left", wraplength=660, anchor="w")
         self.finish_status_label.pack(anchor="w", fill="x", pady=(16, 8))
 
@@ -695,12 +701,36 @@ class OnboardingWizard(tk.Tk):
         )
         # Only packed once applying display settings actually starts.
 
+    def _missing_emulators_warning(self) -> str:
+        """Surfaced here, not just on the Emulator Folders step itself, so
+        it's the last thing seen before saving rather than something only
+        visible if you happen to scroll back -- a console mapped to an
+        emulator that was never found here will silently fail to launch
+        later with no obvious link back to this step."""
+        if self.scan_results is None:
+            return (
+                "You haven't scanned for installed PC emulators yet -- go back to "
+                "\"Emulator Folders\" and click \"Scan for installed emulators\" to confirm "
+                "they'll actually be found before finishing."
+            )
+        missing = [label for label, ok in self.scan_results if not ok]
+        if not missing:
+            return ""
+        return (
+            f"Still not found: {', '.join(missing)} -- games mapped to these won't launch until "
+            "they're installed and you rescan (back on \"Emulator Folders\")."
+        )
+
     def _summary_lines(self) -> list[str]:
         display_note = " (will cold-boot the VM once to apply)" if self._display_changed() else " (already matches)"
+        if self.scan_results is not None:
+            found = sum(1 for _, ok in self.scan_results if ok)
+            emulator_note = f" ({found}/{len(self.scan_results)} emulators found)"
+        else:
+            emulator_note = " (not scanned yet)"
         return [
             f"ROM folder: {self.roms_dir_var.get().strip() or '(not set)'}",
-            f"Emulator search folders: {len(self.search_roots)}"
-            + (f" ({sum(1 for _, ok in self.scan_results if ok)} emulators found)" if self.scan_results is not None else ""),
+            f"Emulator search folders: {len(self.search_roots)}{emulator_note}",
             f"Emulator mappings: {len(self.emulators)} configured",
             f"Display: {self.display_width_var.get()}×{self.display_height_var.get()} @ {self.display_refresh_var.get()}Hz{display_note}",
             f"Quit hotkey: {self._describe_hotkey(self.quit_mod_vars, self.quit_key_var)}",
