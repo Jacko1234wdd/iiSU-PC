@@ -30,7 +30,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import winapi
-from bridge_config import CONFIG_PATH, ConfigMissingError, load_config
+from bridge_config import CONFIG_PATH, load_config
 from console_names import load_console_lookup, resolve_console_shortname
 from emulator_dialogs import EmulatorDialog, RedirectorInstallDialog
 from launch_bridge import find_emulator_for_package, find_executable, find_rom
@@ -45,7 +45,7 @@ INSTALLER_DIR = PROJECT_ROOT / "installer"
 sys.path.insert(0, str(PROJECT_ROOT))
 from shared import theme
 from shared.avatars import fetch_avatar_bytes, make_circular_photo, make_placeholder_circle
-from shared.emulator_defaults import all_stub_packages, describe_profile
+from shared.emulator_defaults import describe_profile
 from shared.theme import (
     BG, ENTRY_KWARGS, GRADIENT_STOPS, GRAY, GREEN, LISTBOX_KWARGS, PANEL_BG, PANEL_BG_HOVER,
     RED, TEXT, TEXT_DIM, FONT_BODY, FONT_HEADING, FONT_MONO, FONT_TITLE, Card, QueueWriter, draw_gradient_bar,
