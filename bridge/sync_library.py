@@ -188,8 +188,12 @@ def main() -> None:
     print(f"Building one archive for {len(consoles)} console folder(s), {file_count} placeholder file(s)...")
     tar_path = build_placeholder_tar(consoles, current_fingerprint)
 
-    print("Pushing the archive to the AVD and extracting it in one shot...")
+    push_size_mb = tar_path.stat().st_size / 1e6
+    print(f"Pushing the archive ({push_size_mb:.1f} MB) to the AVD and extracting it in one shot...")
+    push_start = time.time()
     adb("push", str(tar_path), AVD_TAR_PUSH_PATH)
+    push_elapsed = max(time.time() - push_start, 0.01)
+    print(f"Pushed in {push_elapsed:.1f}s ({push_size_mb / push_elapsed:.1f} MB/s).")
     # rm -rf first so a console removed from the real library (or renamed)
     # doesn't leave its old placeholders behind -- tar only ever adds/
     # overwrites, it never removes what a previous sync left there.
