@@ -21,10 +21,15 @@ folder happens to be named on disk (e.g. "Playstation 1") into iiSU's
 expected form (e.g. "psx") automatically.
 
 Runs automatically on every start (see start_iisu_pc.py), and skips the
-actual rebuild whenever nothing's changed since the last one -- for a
-large library, the slow part is never walking the real filesystem (fast
-even for tens of thousands of files), it's running one adb shell command
-per placeholder file inside the guest. The "last synced" signal lives
+actual rebuild whenever nothing's changed since the last one. For a
+large library, walking the real filesystem is fast even for tens of
+thousands of files -- what used to be slow was creating each placeholder
+with its own adb shell round trip (a `mkdir` and a `dd`, forked fresh
+inside the guest, once per file). This instead builds one tar archive
+locally (pure local disk I/O, no adb involved) and pushes+extracts it in
+a single adb push plus a single `tar xf` inside the guest, so the sync
+cost no longer scales with round trips at all -- one archive regardless
+of whether it holds a hundred files or a hundred thousand. The "last synced" signal lives
 *inside* the AVD itself (a fingerprint file dropped alongside the
 placeholders), not a local cache file here: a local cache would go stale
 the moment the AVD gets wiped or rebuilt independently of the real
@@ -35,10 +40,12 @@ there, never by a guess about it.
 """
 
 import hashlib
+import io
 import json
 import shlex
 import subprocess
 import sys
+import tarfile
 import time
 from pathlib import Path
 
@@ -46,9 +53,13 @@ from console_names import load_console_lookup, resolve_console_shortname
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
 
-AVD_ROMS_ROOT = "/sdcard/Roms"
-FINGERPRINT_PATH = f"{AVD_ROMS_ROOT}/.sync_fingerprint"
+AVD_SDCARD_ROOT = "/sdcard"
+AVD_ROMS_DIRNAME = "Roms"
+AVD_ROMS_ROOT = f"{AVD_SDCARD_ROOT}/{AVD_ROMS_DIRNAME}"
+FINGERPRINT_NAME = ".sync_fingerprint"
+FINGERPRINT_PATH = f"{AVD_ROMS_ROOT}/{FINGERPRINT_NAME}"
 PLACEHOLDER_SIZE_KB = 4
+AVD_TAR_PUSH_PATH = "/data/local/tmp/sync_library.tar"
 
 IGNORE_TOP_LEVEL = {"folder.ico", "sync.ffs_lock"}
 
@@ -60,7 +71,7 @@ def adb(*args: str, check: bool = True) -> subprocess.CompletedProcess:
 def scan_library(roms_dir: Path, exact: dict, by_compact: dict) -> tuple[dict[str, list[tuple[str, int, int]]], list[str]]:
     """Walks roms_dir once, grouping recognized console folders' files by
     iiSU short name with (relative path, size, mtime) for each -- both
-    what's needed to build the sync script AND to fingerprint the library
+    what's needed to build the sync archive AND to fingerprint the library
     for change detection come from this one walk."""
     consoles: dict[str, list[tuple[str, int, int]]] = {}
     skipped = []
@@ -121,6 +132,28 @@ def wait_for_external_storage(timeout: float = 60.0) -> bool:
     return False
 
 
+def build_placeholder_tar(consoles: dict[str, list[tuple[str, int, int]]], current_fingerprint: str) -> Path:
+    """Builds one local tar archive holding every placeholder file (plus the
+    fingerprint file) with paths already relative to /sdcard, so extracting
+    it there with a plain `tar xf` recreates the whole Roms/ tree -- tar
+    creates whatever parent directories a member needs, so nothing here has
+    to mkdir anything up front. All of this is local disk I/O; nothing here
+    talks to the device."""
+    placeholder = b"\0" * (PLACEHOLDER_SIZE_KB * 1024)
+    tar_path = Path(__file__).parent / "_sync_tmp.tar"
+    with tarfile.open(tar_path, "w") as tar:
+        for shortname, entries in consoles.items():
+            for rel, _size, _mtime in entries:
+                info = tarfile.TarInfo(name=f"{AVD_ROMS_DIRNAME}/{shortname}/{rel}")
+                info.size = len(placeholder)
+                tar.addfile(info, io.BytesIO(placeholder))
+        fingerprint_bytes = current_fingerprint.encode("utf-8")
+        info = tarfile.TarInfo(name=f"{AVD_ROMS_DIRNAME}/{FINGERPRINT_NAME}")
+        info.size = len(fingerprint_bytes)
+        tar.addfile(info, io.BytesIO(fingerprint_bytes))
+    return tar_path
+
+
 def main() -> None:
     with open(CONFIG_PATH, encoding="utf-8") as f:
         config = json.load(f)
@@ -152,38 +185,27 @@ def main() -> None:
         print(f"Library unchanged ({file_count} file(s) across {len(consoles)} console(s)) -- skipping resync.")
         return
 
-    script_lines = [f"rm -rf {shlex.quote(AVD_ROMS_ROOT)}"]
-    for shortname, entries in consoles.items():
-        avd_console_root = f"{AVD_ROMS_ROOT}/{shortname}"
-        script_lines.append(f"mkdir -p {shlex.quote(avd_console_root)}")
-        seen_dirs = set()
-        for rel, _size, _mtime in entries:
-            avd_path = f"{avd_console_root}/{rel}"
-            parent = str(Path(avd_path).parent.as_posix())
-            if parent not in seen_dirs:
-                script_lines.append(f"mkdir -p {shlex.quote(parent)}")
-                seen_dirs.add(parent)
-            script_lines.append(
-                f"dd if=/dev/zero of={shlex.quote(avd_path)} bs=1024 count={PLACEHOLDER_SIZE_KB} 2>/dev/null"
-            )
-    # Written last, inside the same script, so it only lands once
-    # everything else has actually succeeded.
-    script_lines.append(f"echo {shlex.quote(current_fingerprint)} > {shlex.quote(FINGERPRINT_PATH)}")
+    print(f"Building one archive for {len(consoles)} console folder(s), {file_count} placeholder file(s)...")
+    tar_path = build_placeholder_tar(consoles, current_fingerprint)
 
-    script_text = "\n".join(script_lines) + "\n"
-    local_script = Path(__file__).parent / "_sync_tmp.sh"
-    local_script.write_text(script_text, encoding="utf-8", newline="\n")
-
-    print(f"Pushing {len(consoles)} console folder(s), {file_count} placeholder file(s) to the AVD...")
-    adb("push", str(local_script), "/data/local/tmp/sync_library.sh")
-    result = adb("shell", "sh /data/local/tmp/sync_library.sh", check=False)
+    print("Pushing the archive to the AVD and extracting it in one shot...")
+    adb("push", str(tar_path), AVD_TAR_PUSH_PATH)
+    # rm -rf first so a console removed from the real library (or renamed)
+    # doesn't leave its old placeholders behind -- tar only ever adds/
+    # overwrites, it never removes what a previous sync left there.
+    extract_cmd = (
+        f"rm -rf {shlex.quote(AVD_ROMS_ROOT)} && "
+        f"cd {shlex.quote(AVD_SDCARD_ROOT)} && tar xf {shlex.quote(AVD_TAR_PUSH_PATH)}"
+    )
+    result = adb("shell", extract_cmd, check=False)
+    adb("shell", f"rm -f {shlex.quote(AVD_TAR_PUSH_PATH)}", check=False)
+    tar_path.unlink(missing_ok=True)
     if result.returncode != 0:
-        print("adb shell script failed:")
+        print("Extracting the archive on the AVD failed:")
         print(result.stdout)
         print(result.stderr)
         sys.exit(1)
 
-    local_script.unlink(missing_ok=True)
     print("Done. Now hit \"Rescan full library\" in iiSU's Library settings.")
 
 
