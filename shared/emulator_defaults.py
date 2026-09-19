@@ -116,12 +116,72 @@ STANDALONE_DEFAULTS = [
         "pre_args": [],
     },
     {
+        "console": "nds",
+        "console_label": "Nintendo DS (melonDualDS)",
+        # melonDualDS is a separate Android package, not a suffixed variant
+        # of me.magnum.melonds -- "me.magnum.melondualds".startswith("me.magnum.melonds")
+        # is False (they diverge after "melond"), so without this as its
+        # own entry a melonDualDS install would never match the prefix
+        # lookup in launch_bridge.find_emulator_for_package at all.
+        "package": "me.magnum.melondualds",
+        "app_label": "melonDS",
+        "exe_names": ["melonDS.exe"],
+        "pre_args": [],
+    },
+    {
         "console": "dreamcast",
         "console_label": "Sega Dreamcast",
         "package": "com.flycast.emulator",
         "app_label": "Flycast",
         "exe_names": ["flycast.exe"],
         "pre_args": [],
+    },
+    {
+        "console": "ps3",
+        "console_label": "Sony PlayStation 3",
+        "package": "aenu.aps3e",
+        "app_label": "RPCS3",
+        "exe_names": ["rpcs3.exe"],
+        "pre_args": ["--no-gui", "--fullscreen"],
+    },
+    {
+        "console": "psvita",
+        "console_label": "Sony PlayStation Vita",
+        "package": "org.vita3k.emulator",
+        "app_label": "Vita3K",
+        "exe_names": ["Vita3K.exe"],
+        "pre_args": ["-F"],
+    },
+    {
+        "console": "switch",
+        "console_label": "Nintendo Switch",
+        "package": "org.citron.citron_emu",
+        "app_label": "Citron",
+        # Citron is the actively-maintained continuation of Yuzu after
+        # Yuzu's takedown; both packages below are routed to the same
+        # citron.exe since that's the only Switch emulator this project
+        # can point to now. No Ryujinx entry exists here on purpose --
+        # iiSU's own bundled emulator list has no Ryujinx package at all,
+        # so iiSU would never report it as the launching package regardless
+        # of whether it's installed on the PC side.
+        "exe_names": ["citron.exe"],
+        "pre_args": ["-f"],
+    },
+    {
+        "console": "switch",
+        "console_label": "Nintendo Switch (Citron EA)",
+        "package": "org.citron.citron_emu.ea",
+        "app_label": "Citron",
+        "exe_names": ["citron.exe"],
+        "pre_args": ["-f"],
+    },
+    {
+        "console": "switch",
+        "console_label": "Nintendo Switch (Yuzu)",
+        "package": "org.yuzu.yuzu_emu",
+        "app_label": "Citron",
+        "exe_names": ["citron.exe"],
+        "pre_args": ["-f"],
     },
 ]
 
