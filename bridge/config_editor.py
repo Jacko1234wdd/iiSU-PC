@@ -25,6 +25,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 import winapi
 from bridge_config import CONFIG_PATH, ConfigMissingError, load_config
 from console_names import load_console_lookup, resolve_console_shortname
+from launch_bridge import find_emulator_for_package, find_executable, find_rom
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from shared import theme
@@ -351,6 +352,7 @@ class SetupApp(tk.Tk):
         ttk.Button(btn_row, text="Add...", style="Ghost.TButton", command=self._add_emulator).pack(side="left")
         ttk.Button(btn_row, text="Edit selected...", style="Ghost.TButton", command=self._edit_emulator).pack(side="left", padx=(8, 0))
         ttk.Button(btn_row, text="Remove selected", style="Ghost.TButton", command=self._remove_emulator).pack(side="left", padx=(8, 0))
+        ttk.Button(btn_row, text="Test selected...", style="Ghost.TButton", command=self._test_emulator_mapping).pack(side="left", padx=(8, 0))
         ttk.Button(btn_row, text="Install Redirector Apps...", style="Ghost.TButton", command=self._open_redirector_dialog).pack(side="left", padx=(8, 0))
 
     def _open_redirector_dialog(self) -> None:
@@ -397,6 +399,54 @@ class SetupApp(tk.Tk):
     def _remove_emulator(self):
         for item in self.emulators_tree.selection():
             self.emulators_tree.delete(item)
+
+    def _test_emulator_mapping(self) -> None:
+        """Runs the exact same resolution logic launch_bridge.py uses for a
+        real launch (find_emulator_for_package + find_executable/find_rom),
+        against your current search folders and ROM directory, without
+        starting the AVD or anything else -- so a misconfigured mapping
+        shows up here in a couple of seconds instead of only after a full
+        launch attempt from inside iiSU fails silently."""
+        selected = self.emulators_tree.selection()
+        if not selected:
+            messagebox.showinfo("Nothing selected", "Select a mapping in the list first.")
+            return
+        prefix = selected[0]
+        profile = self.config_data.get("emulators", {}).get(prefix)
+        if profile is None:
+            messagebox.showerror("Can't test", "This mapping hasn't been saved yet -- click Save first, then try again.")
+            return
+
+        rom_filename = None
+        if "by_extension" in profile:
+            rom_path_str = filedialog.askopenfilename(
+                title="Pick a ROM to test this mapping against (it resolves per file extension)"
+            )
+            if not rom_path_str:
+                return
+            rom_filename = Path(rom_path_str).name
+
+        resolved = find_emulator_for_package(prefix, {prefix: profile}, rom_filename, None)
+        if resolved is None:
+            messagebox.showerror(
+                "No match", f"'{prefix}'" + (f" with '{rom_filename}'" if rom_filename else "") + " doesn't resolve to any configured executable."
+            )
+            return
+
+        search_roots = [Path(r) for r in self.search_roots_list.get(0, "end")]
+        executable = find_executable(resolved["exe_names"], search_roots, {"executables": {}})
+
+        lines = [
+            f"Looking for: {', '.join(resolved['exe_names'])}",
+            f"Launch flags: {' '.join(resolved['pre_args']) or '(none)'}",
+            f"Found: {executable}" if executable else f"NOT found under any of your {len(search_roots)} search folder(s).",
+        ]
+        if rom_filename:
+            roms_dir = Path(self.roms_dir_var.get().strip())
+            rom_path = find_rom(rom_filename, roms_dir, {"roms": {}})
+            lines.append(f"ROM: found at {rom_path}" if rom_path else f"ROM: NOT found under {roms_dir}")
+
+        messagebox.showinfo("Test result", "\n".join(lines))
 
     # -- Display tab -------------------------------------------------
 
