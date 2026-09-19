@@ -27,7 +27,9 @@ Once everything's confirmed working, the installer deletes its own copy of the A
 
 ## Day to day use
 
-Double-click the **desktop shortcut** Setup created to launch straight into iiSU, or run **`iiSU-PC Manager.bat`** (in `bridge/`) for the full Manager -- one window covering everything, navigated with the hamburger (☰) sidebar instead of several separate tools:
+Double-click the **desktop shortcut** Setup created to launch straight into iiSU, or run **`iiSU-PC Manager.bat`** (in `bridge/`) for the full Manager -- one window covering everything, navigated with the hamburger (☰) sidebar instead of several separate tools.
+
+Every start (either path) checks for updates first (`bridge/updater.py`). If this is a git checkout, it fetches and fast-forwards the branch you're actually on (dev stays on dev, master stays on master, no configuration needed) -- always a no-op unless it's a clean update, so uncommitted local changes never get clobbered, just left alone with a note to `git pull` by hand. A plain downloaded/extracted install (no `.git` folder) instead compares `VERSION` against the latest GitHub Release and only prints a link -- it never modifies files in place. Either way this can't make the run in progress use the new code; it just means the *next* start will.
 
 - **Home** -- live AVD/bridge status, the Open/Stop button, a running status line during Start/Stop (not just a spinner), and quick buttons to your ROMs folder and the logs folder (the AVD, bridge, and shutdown-hotkey processes all run without a visible console window, logging to `emulator.log`/`bridge.log`/`stop.log` instead).
 - **ROM Directory**, **Emulators**, **Display**, **Advanced** -- everything `config.json` holds, edited here and saved with one Save button at the bottom. The Emulators page's "Test Selected..." button checks where a mapping resolves to (and whether that executable is actually found) without starting the AVD.
@@ -52,6 +54,7 @@ Before any of that can happen, though, iiSU needs to think a real emulator is in
 
 ```
 Setup.bat, Uninstall.bat   installer/ entry points (CLI-only shortcuts to setup_gui.py / uninstall.py)
+VERSION                    this install's release tag, compared against GitHub Releases by updater.py on a non-git install
 
 shared/theme.py            the dark/gradient look shared by every GUI in this project
 shared/emulator_defaults.py  curated console -> PC emulator mappings, and which need a redirector
@@ -74,7 +77,8 @@ bridge/
   onboarding_wizard.py     step-by-step first-run setup, launched automatically after Setup finishes
   bridge_config.py         shared config.json loader (used by everything below)
   apply_display.py         applies config.json's display settings to the AVD and cold-boots it
-  start_iisu_pc.py         boots the AVD (if needed) and starts launch_bridge.py
+  start_iisu_pc.py         checks for updates, boots the AVD (if needed), and starts launch_bridge.py
+  updater.py               checks for (and, on a git checkout, applies) updates before every start
   stop_iisu_pc.py          tears both back down
   launch_bridge.py         listens for launch requests from the patched APK, runs the PC emulator
   controller_bridge.py     forwards controller input into the AVD; Back+Start closes everything

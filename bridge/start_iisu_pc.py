@@ -1,6 +1,7 @@
 """
-One-shot launcher for the whole iiSU-PC setup: starts the AVD if it isn't
-already running, then starts the launch bridge if it isn't already running.
+One-shot launcher for the whole iiSU-PC setup: checks for updates to the
+project itself (updater.py), then starts the AVD if it isn't already
+running, then starts the launch bridge if it isn't already running.
 
 This is the single entry point meant for day-to-day use -- it's what runs
 when you click Open (or Stop -> Open again) on manager.py's Home page,
@@ -39,6 +40,7 @@ import time
 from pathlib import Path
 
 import sync_library
+import updater
 from bridge_config import ConfigMissingError, load_config
 from portable_sdk import PORTABLE_AVD_HOME, PORTABLE_SDK, disable_quickboot_autosave, ensure_portable_sdk
 
@@ -250,6 +252,8 @@ def sync_rom_library() -> None:
 
 
 def main() -> None:
+    updater.check_for_updates()
+
     try:
         config = load_config()
     except ConfigMissingError as e:
