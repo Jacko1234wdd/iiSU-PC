@@ -109,23 +109,60 @@ def detect_avd_name() -> str:
     return DEFAULT_AVD_NAME
 
 
-def remove_avd(avd_name: str, total: list) -> None:
+def _collect_targets(avd_name: str) -> list[Path]:
+    """Every path a full uninstall removes -- used both for the preview
+    printed before confirmation and for the actual removal, so the two
+    can never drift out of sync with each other."""
+    targets = [
+        BRIDGE_DIR / "android-sdk-portable",
+        BRIDGE_DIR / "config.json",
+        BRIDGE_DIR / ".path_cache.json",
+        BRIDGE_DIR / ".runtime_state.json",
+        BRIDGE_DIR / "emulator.log",
+        BRIDGE_DIR / ".iisu_icon.ico",
+        BRIDGE_DIR / "_icon_extract_tmp",
+        INSTALLER_DIR / "android-sdk",
+        INSTALLER_DIR / "_work",
+        INSTALLER_DIR / "_cmdline_tools_extract",
+        INSTALLER_DIR / "commandlinetools.zip",
+        INSTALLER_DIR / "keystore",
+        INSTALLER_DIR / "tools" / "build-tools",
+    ]
+
     avd_home = Path.home() / ".android" / "avd"
     for name in {avd_name, DEVICE_PROFILE}:
-        total[0] += _remove(avd_home / f"{name}.avd")
-        total[0] += _remove(avd_home / f"{name}.ini")
+        targets.append(avd_home / f"{name}.avd")
+        targets.append(avd_home / f"{name}.ini")
         # The emulator's own per-AVD scratch/log directory, separate from
         # the *.avd config folder itself (e.g. ~/.android/iisuwin/).
-        total[0] += _remove(Path.home() / ".android" / name)
+        targets.append(Path.home() / ".android" / name)
 
-
-def remove_desktop_shortcut(total: list) -> None:
     try:
         import create_shortcut
-        shortcut_path = create_shortcut.desktop_dir() / create_shortcut.SHORTCUT_NAME
+        targets.append(create_shortcut.desktop_dir() / create_shortcut.SHORTCUT_NAME)
     except Exception:
-        shortcut_path = Path.home() / "Desktop" / "iiSU-PC.lnk"
-    total[0] += _remove(shortcut_path)
+        targets.append(Path.home() / "Desktop" / "iiSU-PC.lnk")
+
+    return targets
+
+
+def print_preview(targets: list[Path]) -> None:
+    """Sizes everything up front and shows it before the confirmation
+    prompt, instead of only finding out how much got reclaimed after it's
+    already gone -- makes the "type yes" prompt an informed decision
+    rather than a leap of faith."""
+    existing = [path for path in targets if path.exists()]
+    if not existing:
+        print("Nothing to remove -- this already looks like a clean slate.\n")
+        return
+    total = 0
+    print("This will remove:")
+    for path in existing:
+        size = _dir_size(path)
+        total += size
+        suffix = f"  ({size / 1e9:.2f} GB)" if size >= 1e8 else ""
+        print(f"  - {path}{suffix}")
+    print(f"\n~{total / 1e9:.2f} GB will be reclaimed.\n")
 
 
 def main() -> None:
@@ -134,37 +171,22 @@ def main() -> None:
     print("keystore, and the desktop shortcut. It does NOT touch your ROM library,")
     print("your PC emulators, or the iiSU APK you supplied in installer/input/.\n")
 
+    avd_name = detect_avd_name()
+    targets = _collect_targets(avd_name)
+    print_preview(targets)
+
     if "--yes" not in sys.argv:
         answer = input("Type 'yes' to continue: ").strip().lower()
         if answer != "yes":
             print("Cancelled -- nothing was removed.")
             return
 
-    avd_name = detect_avd_name()
     stop_running_instance()
 
-    total = [0]
-    print("\n[uninstall] removing bridge/ generated state...")
-    for rel in [
-        "android-sdk-portable", "config.json", ".path_cache.json",
-        ".runtime_state.json", "emulator.log", ".iisu_icon.ico", "_icon_extract_tmp",
-    ]:
-        total[0] += _remove(BRIDGE_DIR / rel)
+    print("\n[uninstall] removing...")
+    reclaimed = sum(_remove(path) for path in targets)
 
-    print("[uninstall] removing installer/ generated state...")
-    for rel in [
-        "android-sdk", "_work", "_cmdline_tools_extract",
-        "commandlinetools.zip", "keystore", "tools/build-tools",
-    ]:
-        total[0] += _remove(INSTALLER_DIR / rel)
-
-    print(f"[uninstall] removing the '{avd_name}' AVD...")
-    remove_avd(avd_name, total)
-
-    print("[uninstall] removing the desktop shortcut...")
-    remove_desktop_shortcut(total)
-
-    print(f"\n=== Done -- reclaimed {total[0] / 1e9:.1f} GB ===")
+    print(f"\n=== Done -- reclaimed {reclaimed / 1e9:.1f} GB ===")
     print(f"Kept: installer/input/*.apk (your own file) and installer/tools/apktool.jar (a project asset).")
     print(
         "\nNot touched: %LOCALAPPDATA%\\Android\\Sdk. Depending on how the SDK\n"
