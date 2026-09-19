@@ -5,6 +5,7 @@ a progress log, and a button into the config editor (config_editor.py).
 Stdlib only (tkinter), no extra installs.
 """
 
+import os
 import queue
 import subprocess
 import sys
@@ -12,7 +13,7 @@ import threading
 import traceback
 import tkinter as tk
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from shared import theme
@@ -49,9 +50,12 @@ class ControlPanel(tk.Tk):
 
         self.log_queue: queue.Queue = queue.Queue()
         self.busy = False
+        self._last_avd_up: bool | None = None
+        self._last_bridge_up: bool | None = None
 
         self._configure_style()
         self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._poll_log_queue)
         self.after(200, self._poll_status)
 
@@ -99,9 +103,14 @@ class ControlPanel(tk.Tk):
         self.stop_button = ttk.Button(button_row, text="Stop", style="Accent.TButton", command=self._stop)
         self.stop_button.pack(side="left", padx=(10, 0))
         ttk.Button(button_row, text="Configure...", style="Ghost.TButton", command=self._open_configure).pack(side="left", padx=(10, 0))
+        ttk.Button(button_row, text="ROMs Folder", style="Ghost.TButton", command=self._open_roms_folder).pack(side="left", padx=(10, 0))
+        ttk.Button(button_row, text="Logs", style="Ghost.TButton", command=self._open_logs).pack(side="left", padx=(10, 0))
 
         self.progress = ttk.Progressbar(button_row, mode="indeterminate", style="Dark.Horizontal.TProgressbar")
         self.progress.pack(side="left", fill="x", expand=True, padx=(16, 0))
+
+        self.stage_label = tk.Label(self, text="", font=FONT_BODY, bg=BG, fg=TEXT_DIM, anchor="w")
+        self.stage_label.pack(fill="x", padx=20, pady=(0, 8))
 
         log_card = Card(self)
         log_card.pack(fill="both", expand=True, padx=20, pady=(0, 20))
@@ -129,6 +138,8 @@ class ControlPanel(tk.Tk):
         self.after(0, self._apply_status, avd_up, bridge_up)
 
     def _apply_status(self, avd_up: bool | None, bridge_up: bool | None) -> None:
+        self._last_avd_up = avd_up
+        self._last_bridge_up = bridge_up
         if self.busy:
             return
         if avd_up is None:
@@ -151,6 +162,18 @@ class ControlPanel(tk.Tk):
         self.log_text.insert("end", text)
         self.log_text.see("end")
         self.log_text.config(state="disabled")
+        self._update_stage_label(text)
+
+    def _update_stage_label(self, text: str) -> None:
+        # start_iisu_pc.py / stop_iisu_pc.py already print one clear
+        # "[start]"/"[stop]"-prefixed line per major step -- reusing the
+        # last one of those as a standing status line means this never
+        # needs its own separate list of stage names to keep in sync with
+        # what those scripts actually do.
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("[start] ") or line.startswith("[stop] "):
+                self.stage_label.config(text=line.split("] ", 1)[1])
 
     def _poll_log_queue(self) -> None:
         try:
@@ -176,6 +199,7 @@ class ControlPanel(tk.Tk):
         if self.busy:
             return
         self._set_busy(True)
+        self.stage_label.config(text="Starting...")
         self._append_log("\n--- Start ---\n")
         threading.Thread(target=self._run_guarded, args=(start_iisu_pc.main,), daemon=True).start()
 
@@ -183,6 +207,7 @@ class ControlPanel(tk.Tk):
         if self.busy:
             return
         self._set_busy(True)
+        self.stage_label.config(text="Stopping...")
         self._append_log("\n--- Stop ---\n")
         threading.Thread(target=self._run_guarded, args=(stop_iisu_pc.main,), daemon=True).start()
 
@@ -203,6 +228,41 @@ class ControlPanel(tk.Tk):
 
     def _open_configure(self) -> None:
         subprocess.Popen([sys.executable, "config_editor.py"], cwd=str(SCRIPT_DIR))
+
+    def _open_roms_folder(self) -> None:
+        try:
+            config = start_iisu_pc.load_config()
+        except Exception as e:
+            messagebox.showerror("Can't open ROMs folder", str(e))
+            return
+        roms_dir = Path(config.get("roms_dir", ""))
+        if not roms_dir.is_dir():
+            messagebox.showerror("Can't open ROMs folder", f"{roms_dir} doesn't exist yet -- set it up in Configure first.")
+            return
+        os.startfile(roms_dir)
+
+    def _open_logs(self) -> None:
+        log_path = SCRIPT_DIR / "emulator.log"
+        if not log_path.is_file():
+            messagebox.showinfo("No log yet", "emulator.log doesn't exist yet -- start the AVD at least once first.")
+            return
+        os.startfile(log_path)
+
+    def _on_close(self) -> None:
+        # control_panel.py doesn't own the AVD/bridge processes -- both run
+        # fully detached (see start_iisu_pc.py), so closing this window has
+        # no effect on either one either way. Worth confirming anyway: it's
+        # easy to read "closing the app" as "stopping iiSU-PC".
+        if self._last_avd_up or self._last_bridge_up:
+            proceed = messagebox.askyesno(
+                "iiSU-PC is still running",
+                "The Android VM and/or launch bridge are still running in the background.\n\n"
+                "Closing this window will NOT stop them -- use Stop first if you want to shut "
+                "everything down.\n\nClose this window anyway?",
+            )
+            if not proceed:
+                return
+        self.destroy()
 
 
 if __name__ == "__main__":
