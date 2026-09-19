@@ -400,11 +400,12 @@ class Manager(tk.Tk):
         os.startfile(roms_dir)
 
     def _open_logs(self) -> None:
-        log_path = BRIDGE_DIR / "emulator.log"
-        if not log_path.is_file():
-            messagebox.showinfo("No log yet", "emulator.log doesn't exist yet -- start the AVD at least once first.")
-            return
-        os.startfile(log_path)
+        # Opens the folder rather than one hardcoded file -- emulator.log
+        # (AVD boot), bridge.log (launch/redirect activity), and stop.log
+        # (shutdown-hotkey teardown) are all separate now that none of
+        # those processes get a visible console of their own to check
+        # instead.
+        os.startfile(BRIDGE_DIR)
 
     def _on_close(self) -> None:
         if self._last_avd_up or self._last_bridge_up:

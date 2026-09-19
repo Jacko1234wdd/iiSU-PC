@@ -45,6 +45,7 @@ from portable_sdk import PORTABLE_AVD_HOME, PORTABLE_SDK, disable_quickboot_auto
 BRIDGE_SCRIPT = Path(__file__).parent / "launch_bridge.py"
 STATE_PATH = Path(__file__).parent / ".runtime_state.json"
 EMULATOR_LOG_PATH = Path(__file__).parent / "emulator.log"
+BRIDGE_LOG_PATH = Path(__file__).parent / "bridge.log"
 
 AVD_BOOT_TIMEOUT = 120  # seconds
 MAX_LAUNCH_ATTEMPTS = 3
@@ -274,12 +275,20 @@ def main() -> None:
     if is_port_open(port):
         print(f"[start] Bridge is already running on port {port}.")
     else:
-        print("[start] Starting the launch bridge in its own window...")
-        bridge_process = subprocess.Popen(
-            [sys.executable, str(BRIDGE_SCRIPT)],
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
-            cwd=str(BRIDGE_SCRIPT.parent),
-        )
+        print(f"[start] Starting the launch bridge (logging to {BRIDGE_LOG_PATH.name})...")
+        bridge_log_file = open(BRIDGE_LOG_PATH, "wb")
+        try:
+            bridge_process = subprocess.Popen(
+                [sys.executable, str(BRIDGE_SCRIPT)],
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                stdin=subprocess.DEVNULL,
+                stdout=bridge_log_file,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
+                cwd=str(BRIDGE_SCRIPT.parent),
+            )
+        finally:
+            bridge_log_file.close()
         state["bridge_pid"] = bridge_process.pid
         # Give it a moment to bind before reporting success. Generous on
         # purpose: launch_iisu() inside the bridge retries `am start` for up
@@ -293,7 +302,7 @@ def main() -> None:
         if is_port_open(port):
             print("[start] Bridge is up.")
         else:
-            print("[start] Bridge didn't come up in time -- check its console window for errors.")
+            print(f"[start] Bridge didn't come up in time -- check {BRIDGE_LOG_PATH.name} for errors.")
 
     save_state(state)
     print("[start] Ready. Launching a game in iiSU will now hand off to the real PC emulator.")

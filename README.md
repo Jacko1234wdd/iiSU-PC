@@ -29,7 +29,7 @@ Once everything's confirmed working, the installer deletes its own copy of the A
 
 Double-click the **desktop shortcut** Setup created to launch straight into iiSU, or run **`iiSU-PC Manager.bat`** (in `bridge/`) for the full Manager -- one window covering everything, navigated with the hamburger (☰) sidebar instead of several separate tools:
 
-- **Home** -- live AVD/bridge status, the Open/Stop button, a running status line during Start/Stop (not just a spinner), and quick buttons to your ROMs folder and the emulator log.
+- **Home** -- live AVD/bridge status, the Open/Stop button, a running status line during Start/Stop (not just a spinner), and quick buttons to your ROMs folder and the logs folder (the AVD, bridge, and shutdown-hotkey processes all run without a visible console window, logging to `emulator.log`/`bridge.log`/`stop.log` instead).
 - **ROM Directory**, **Emulators**, **Display**, **Advanced** -- everything `config.json` holds, edited here and saved with one Save button at the bottom. The Emulators page's "Test Selected..." button checks where a mapping resolves to (and whether that executable is actually found) without starting the AVD.
 - **Credits** -- who built this and how (see below).
 - **Uninstall** -- tucked below a divider at the bottom of the sidebar since it's not an everyday action; see Uninstalling.
@@ -46,7 +46,7 @@ Either open the Manager's **Uninstall** page (bottom of the sidebar) for a graph
 
 `installer/patch_iisu.py` decompiles your iiSU APK, redirects its ROM-launch code to a small injected class that sends the launch request to `bridge/launch_bridge.py` over a local socket, then rebuilds and signs it with a key generated just for your install. The bridge matches the requested game to a PC emulator (configured in `bridge/config.json`) and launches it directly on Windows.
 
-Before any of that can happen, though, iiSU needs to think a real emulator is installed for each console -- it checks for one of a few known Android package names before it'll treat a console as playable. Setup installs a placeholder "redirector" app for each one (`installer/stub_apk.py`, built from `shared/emulator_defaults.py`'s curated console list) -- it does nothing itself, since the patched launch never reaches it, but its presence (with a real icon, so it doesn't look out of place next to actual apps in iiSU's own "Installed Emulators" list) is what makes iiSU offer that console at all. The Manager's Emulators page has an "Install Redirector Apps..." button that re-runs this any time (e.g. after adding a console's emulator by hand).
+Before any of that can happen, though, iiSU needs to think a real emulator is installed for each console -- it checks for one of a few known Android package names before it'll treat a console as playable. Setup installs a placeholder "redirector" app for each one (`installer/stub_apk.py`, built from `shared/emulator_defaults.py`'s curated console list) -- it does nothing itself, since the patched launch never reaches it, and it deliberately has no icon or other resources (a real icon was tried once, but broke every stub install on API 30+ system images -- see git history). iiSU's own package-visibility check doesn't need one either way. The Manager's Emulators page has an "Install Redirector Apps..." button that re-runs this any time (e.g. after adding a console's emulator by hand).
 
 ## Project layout
 
@@ -88,7 +88,7 @@ bridge/
 ## If something breaks
 
 - `installer/patch_iisu.py`'s patch is anchored on a specific log string in iiSU's code. If iiSU updates and changes that code, the patch will fail loudly with a clear error rather than silently producing a broken build — it needs updating by hand at that point, not just a re-run.
-- `bridge/emulator.log` has the Android emulator's own output if the VM won't boot.
+- `bridge/emulator.log` has the Android emulator's own output if the VM won't boot; `bridge/bridge.log` has the launch bridge's (what it tried to launch and why, if a game doesn't redirect); `bridge/stop.log` has the shutdown-hotkey teardown's. None of these three show a console window of their own -- open the folder from the Manager's Home page (Logs button) to check them.
 - Re-running setup is safe — it skips anything already done (SDK, AVD, keystore) and won't overwrite an existing `bridge/config.json`'s ROM directory/emulator settings.
 - The AVD always cold-boots and never keeps a resume snapshot around (removed automatically after every clean Stop) — a resumed snapshot can carry forward storage/mount state that's since gone stale, so this trades a bit of boot time for not hitting that class of bug.
 

@@ -197,7 +197,7 @@ class SetupApp(tk.Tk):
         tk.Label(self.next_steps_frame, text="Next step:", font=FONT_HEADING, bg=BG, fg=TEXT).pack(anchor="w", pady=(0, 6))
         ttk.Button(
             self.next_steps_frame, text="Open iiSU-PC Manager", style="Accent.TButton",
-            command=lambda: self._launch_bridge_script("manager.py", detached=True),
+            command=lambda: self._launch_bridge_script("manager.py"),
         ).pack(side="left")
         ttk.Button(
             self.next_steps_frame, text="Create Desktop Shortcut", style="Ghost.TButton",
@@ -223,11 +223,14 @@ class SetupApp(tk.Tk):
             return
         messagebox.showinfo("Shortcut created", f"Created {path.name} on your desktop.")
 
-    def _launch_bridge_script(self, script_name: str, detached: bool) -> None:
+    def _launch_bridge_script(self, script_name: str) -> None:
+        # CREATE_NO_WINDOW: this only ever launches manager.py, a GUI app
+        # with nothing worth showing in a console -- a console window
+        # alongside it would just be clutter with no content.
         subprocess.Popen(
             [sys.executable, script_name],
             cwd=str(BRIDGE_DIR),
-            creationflags=subprocess.CREATE_NEW_CONSOLE if detached else 0,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
 
 
