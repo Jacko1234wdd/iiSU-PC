@@ -13,7 +13,9 @@ force-taskkill is only a fallback for whatever the graceful path doesn't
 manage to stop in time -- and even then, any leftover lock files are swept
 away afterward so the next start isn't blocked by them.
 
-Also deletes any snapshot state left behind by the shutdown itself (see
+Also stops the adb server (it's a persistent background process that
+outlives the AVD it was talking to and never exits on its own) and
+deletes any snapshot state left behind by the shutdown itself (see
 clear_snapshots()) -- this AVD always cold-boots, so a saved snapshot is
 just multi-GB dead weight, never something that gets loaded.
 """
@@ -143,6 +145,15 @@ def main() -> None:
     for image_name in ("emulator.exe", "qemu-system-x86_64.exe"):
         print(f"[stop] sweeping any remaining {image_name}...")
         kill_by_name(image_name)
+
+    # adb.exe runs as a persistent background server (any `adb` command
+    # spawns it if it isn't already running) and never exits on its own
+    # just because the AVD it was talking to did -- left alone, it stays
+    # running indefinitely after every single Stop. `adb kill-server` is
+    # the documented graceful shutdown for it, unlike taskkill against the
+    # other two processes above.
+    print("[stop] stopping the adb server...")
+    subprocess.run(["adb", "kill-server"], capture_output=True, text=True)
 
     clear_stale_locks(avd_name)
     clear_snapshots(avd_name)
