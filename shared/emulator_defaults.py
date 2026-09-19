@@ -183,6 +183,25 @@ STANDALONE_DEFAULTS = [
         "exe_names": ["citron.exe"],
         "pre_args": ["-f"],
     },
+    {
+        "console": "xbox",
+        "console_label": "Microsoft Xbox",
+        "package": "com.izzy2lost.x1box",
+        "app_label": "xemu",
+        "exe_names": ["xemu.exe"],
+        "pre_args": [],
+    },
+    {
+        "console": "xbox360",
+        "console_label": "Microsoft Xbox 360",
+        "package": "emu.x360.mobile",
+        "app_label": "Xenia",
+        # Xenia Canary is the actively-maintained fork -- mainline xenia.exe
+        # is kept as a fallback for whichever's actually installed, same
+        # pattern as the Citra/Azahar and melonDS/melonDualDS slots above.
+        "exe_names": ["xenia_canary.exe", "xenia.exe"],
+        "pre_args": ["--fullscreen"],
+    },
 ]
 
 RETROARCH_PACKAGE = "com.retroarch"
