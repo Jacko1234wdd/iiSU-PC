@@ -25,9 +25,14 @@ import json
 import secrets
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 INSTALLER_DIR = Path(__file__).parent
+
+sys.path.insert(0, str(INSTALLER_DIR.parent / "bridge"))
+import portable_sdk  # noqa: E402,F401 -- imported for its import-time PATH fix (adb), not used directly here
+
 TEMPLATE_DIR = INSTALLER_DIR / "stub_apk_template"
 APKTOOL_JAR = INSTALLER_DIR / "tools" / "apktool.jar"
 WORK_DIR = INSTALLER_DIR / "_work" / "stub_build"

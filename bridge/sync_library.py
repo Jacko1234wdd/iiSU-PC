@@ -49,6 +49,7 @@ import tarfile
 import time
 from pathlib import Path
 
+import portable_sdk  # noqa: F401 -- imported for its import-time PATH fix (adb), not used directly here
 from console_names import load_console_lookup, resolve_console_shortname
 
 CONFIG_PATH = Path(__file__).parent / "config.json"

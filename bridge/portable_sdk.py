@@ -18,8 +18,18 @@ the same drive as this project, which isn't subject to whatever that was.
 This only ever *copies* from the existing installation (never modifies
 it), and only does the copy once -- subsequent launches see the portable
 copy already in place and skip straight to using it.
+
+Also puts platform-tools (adb) on this process's own PATH as an
+import-time side effect (see _prepend_platform_tools_to_path()) -- every
+script in this project that shells out to a bare `adb` command assumes
+it's resolvable via PATH, which is only true by accident if the machine
+happens to already have some other Android SDK installed. Confirmed live:
+a fresh machine with no prior Android tooling failed setup outright with
+FileNotFoundError the moment it tried "adb devices", despite the portable
+copy it needed sitting right there on disk.
 """
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -27,6 +37,24 @@ from pathlib import Path
 PORTABLE_ROOT = Path(__file__).parent / "android-sdk-portable"
 PORTABLE_SDK = PORTABLE_ROOT / "sdk"
 PORTABLE_AVD_HOME = PORTABLE_ROOT / "avd-home"
+
+
+def _prepend_platform_tools_to_path() -> None:
+    """Every caller that already imports this module for its constants --
+    which is effectively everywhere that talks to the AVD -- gets adb
+    resolvable for free this way, instead of each one needing to remember
+    to wire this up itself. A no-op if the portable copy hasn't been
+    bootstrapped yet (platform-tools won't exist there, so Windows just
+    skips over it during PATH resolution like any other missing entry),
+    and safe to call more than once (checked against the current PATH
+    first, so this doesn't grow PATH on repeated imports)."""
+    platform_tools = str(PORTABLE_SDK / "platform-tools")
+    current = os.environ.get("PATH", "")
+    if platform_tools not in current.split(os.pathsep):
+        os.environ["PATH"] = platform_tools + os.pathsep + current
+
+
+_prepend_platform_tools_to_path()
 
 
 def _robocopy(src: Path, dst: Path, exclude_dirs: list[str] | None = None) -> None:

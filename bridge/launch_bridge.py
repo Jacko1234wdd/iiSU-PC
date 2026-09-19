@@ -53,6 +53,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 import boot_overlay
+import portable_sdk  # noqa: F401 -- imported for its import-time PATH fix (adb), not used directly here
 from bridge_config import ConfigMissingError, load_config
 from controller_bridge import ControllerBridge
 
