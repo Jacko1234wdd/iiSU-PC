@@ -29,7 +29,7 @@ Once everything's confirmed working, the installer deletes its own copy of the A
 
 Double-click the **desktop shortcut** Setup.bat created to launch straight into iiSU, or run **`iiSU-PC.bat`** (in this folder) for the control panel — live status, Start/Stop, and a button into the ROM directory / PC emulator / hotkey / display settings.
 
-Every start re-syncs your ROM library into the VM automatically, so adding or removing games just means starting iiSU-PC again — no separate step. iiSU itself still needs to notice the change: hit "Rescan full library" in its Library settings after your first start with a new game.
+Every start re-syncs your ROM library into the VM automatically, so adding or removing games just means starting iiSU-PC again — no separate step. It's a no-op if nothing's changed since the last sync (checked by comparing a fingerprint of your library against one saved in the VM itself, so it stays correct even if the VM gets rebuilt independently), so this doesn't add noticeable startup time for a large library on its second and later starts. iiSU itself still needs to notice the change: hit "Rescan full library" in its Library settings after your first start with a new game.
 
 Inside the VM, `Ctrl+Alt+Q` force-quits the current game and returns to iiSU; `Ctrl+Alt+X` closes iiSU and shuts down the VM entirely (both rebindable in Configure). Holding **Back+Start** together on a controller for 2.5s does the same full shutdown, no keyboard needed.
 
@@ -71,7 +71,7 @@ bridge/
   launch_bridge.py         listens for launch requests from the patched APK, runs the PC emulator
   controller_bridge.py     forwards controller input into the AVD; Back+Start closes everything
   portable_sdk.py          copies the SDK/AVD into a self-contained folder under bridge/
-  sync_library.py          mirrors your real ROM library into the AVD as scan-only placeholders -- runs automatically on every start
+  sync_library.py          mirrors your real ROM library into the AVD as scan-only placeholders -- runs automatically on every start, skipping the rebuild if nothing changed
   console_names.py         resolves a ROM folder name to one of iiSU's known consoles
   create_shortcut.py       creates the desktop shortcut, extracting iiSU's icon from your APK
   winapi.py                shared Win32 window-management helpers
