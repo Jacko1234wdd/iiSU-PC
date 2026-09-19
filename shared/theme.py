@@ -1,8 +1,8 @@
 """
-Shared dark-UI theme for iiSU-PC's tkinter front ends (bridge/control_panel.py,
-installer/setup_gui.py): one palette, font set, and small set of building
-blocks so both windows read as one application instead of two unrelated
-tools bolted together.
+Shared dark-UI theme for iiSU-PC's tkinter front ends (bridge/manager.py,
+bridge/onboarding_wizard.py, installer/setup_gui.py): one palette, font
+set, and small set of building blocks so every window reads as one
+application instead of several unrelated tools bolted together.
 
 The palette echoes iiSU's own in-app look (dark background, tile-style
 panels, its cyan-to-purple gradient) -- colors and layout only, not any of

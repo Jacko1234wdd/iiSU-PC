@@ -6,8 +6,11 @@ bootstrap, patching, install) on a background thread while streaming its
 progress into a log view. All the actual work lives in setup_wizard.py /
 sdk_bootstrap.py / patch_iisu.py -- this is purely a front end for it.
 
-Uses shared/theme.py so this and bridge/control_panel.py look like one
-application instead of two different tools bolted together.
+Uses shared/theme.py so this and bridge/manager.py look like one
+application instead of two different tools bolted together -- this stays
+its own separate window rather than a page inside manager.py, since a
+one-time install wizard is a different shape of problem than the settings
+manager.py's sidebar covers afterward.
 
 Stdlib only (tkinter), no extra installs.
 """
@@ -193,16 +196,12 @@ class SetupApp(tk.Tk):
         self.next_steps_frame.pack(fill="x", padx=20, pady=(0, 18))
         tk.Label(self.next_steps_frame, text="Next step:", font=FONT_HEADING, bg=BG, fg=TEXT).pack(anchor="w", pady=(0, 6))
         ttk.Button(
-            self.next_steps_frame, text="Open iiSU-PC", style="Accent.TButton",
-            command=lambda: self._launch_bridge_script("control_panel.py", detached=True),
+            self.next_steps_frame, text="Open iiSU-PC Manager", style="Accent.TButton",
+            command=lambda: self._launch_bridge_script("manager.py", detached=True),
         ).pack(side="left")
         ttk.Button(
             self.next_steps_frame, text="Create Desktop Shortcut", style="Ghost.TButton",
             command=self._create_shortcut,
-        ).pack(side="left", padx=(10, 0))
-        ttk.Button(
-            self.next_steps_frame, text="Open Settings", style="Ghost.TButton",
-            command=self._open_config_editor,
         ).pack(side="left", padx=(10, 0))
 
     def _open_onboarding(self) -> None:
@@ -211,13 +210,10 @@ class SetupApp(tk.Tk):
         this the frontend would show an empty library until the user found
         their own way to a settings screen. Walks through ROM directory,
         emulator folders, display, and hotkeys one step at a time instead
-        of dropping the tabbed editor on someone who's never seen this
-        app before; that editor (config_editor.py) is still there
-        afterward via "Open Settings" for anything this doesn't cover."""
+        of dropping manager.py's settings pages on someone who's never seen
+        this app before; that Manager is still there afterward via "Open
+        iiSU-PC Manager" for anything this doesn't cover."""
         subprocess.Popen([sys.executable, "onboarding_wizard.py"], cwd=str(BRIDGE_DIR))
-
-    def _open_config_editor(self) -> None:
-        subprocess.Popen([sys.executable, "config_editor.py"], cwd=str(BRIDGE_DIR))
 
     def _create_shortcut(self) -> None:
         try:

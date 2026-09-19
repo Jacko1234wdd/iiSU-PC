@@ -1,15 +1,16 @@
 """
 Step-by-step first-run onboarding: ROM directory, emulator search folders,
 display, and hotkeys, walked through one screen at a time with live
-feedback -- instead of dropping a fresh install straight into a notebook of
-tabs meant for occasional later editing (that's still config_editor.py,
-unchanged, reachable afterward from the control panel's Configure button).
+feedback -- instead of dropping a fresh install straight into manager.py's
+settings pages, meant for occasional later editing (still reachable
+afterward from its sidebar).
 
 Launched automatically by installer/setup_gui.py right after setup
-finishes. Reuses config_editor.py's underlying data helpers (console-folder
-recognition, monitor detection, executable search) rather than duplicating
-them, but keeps its own simpler step-flow UI -- a wizard is a different
-shape of problem than a tabbed editor.
+finishes. Shares its emulator-mapping dialogs with manager.py
+(emulator_dialogs.py) and its data helpers (console-folder recognition,
+monitor detection, executable search) with the same modules manager.py
+uses, but keeps its own simpler step-flow UI -- a wizard is a different
+shape of problem than a settings page.
 
 Stdlib only (tkinter), no extra installs.
 """
@@ -24,8 +25,8 @@ from tkinter import filedialog, messagebox, ttk
 
 import winapi
 from bridge_config import CONFIG_PATH, ConfigMissingError, load_config
-from config_editor import EmulatorDialog
 from console_names import load_console_lookup, resolve_console_shortname
+from emulator_dialogs import EmulatorDialog
 from launch_bridge import find_executable
 
 sys.path.insert(0, str(Path(__file__).parent.parent))

@@ -49,7 +49,7 @@ from setup_wizard import DEFAULT_AVD_NAME
 sys.path.insert(0, str(BRIDGE_DIR))
 
 
-def _dir_size(path: Path) -> int:
+def dir_size(path: Path) -> int:
     if path.is_file():
         return path.stat().st_size
     if not path.is_dir():
@@ -57,7 +57,7 @@ def _dir_size(path: Path) -> int:
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
 
-def _remove(path: Path, attempts: int = 5, delay: float = 1.0) -> int:
+def remove_path(path: Path, attempts: int = 5, delay: float = 1.0) -> int:
     """Removes a file or directory tree, retrying briefly on a locked
     file -- a process that was just stopped doesn't always release its
     handles the instant it exits, which can otherwise leave a chunk of a
@@ -65,7 +65,7 @@ def _remove(path: Path, attempts: int = 5, delay: float = 1.0) -> int:
     reclaimed, 0 if the path didn't exist or couldn't be removed."""
     if not path.exists():
         return 0
-    size = _dir_size(path)
+    size = dir_size(path)
     for attempt in range(attempts):
         try:
             if path.is_dir():
@@ -109,7 +109,7 @@ def detect_avd_name() -> str:
     return DEFAULT_AVD_NAME
 
 
-def _collect_targets(avd_name: str) -> list[Path]:
+def collect_targets(avd_name: str) -> list[Path]:
     """Every path a full uninstall removes -- used both for the preview
     printed before confirmation and for the actual removal, so the two
     can never drift out of sync with each other."""
@@ -158,7 +158,7 @@ def print_preview(targets: list[Path]) -> None:
     total = 0
     print("This will remove:")
     for path in existing:
-        size = _dir_size(path)
+        size = dir_size(path)
         total += size
         suffix = f"  ({size / 1e9:.2f} GB)" if size >= 1e8 else ""
         print(f"  - {path}{suffix}")
@@ -172,7 +172,7 @@ def main() -> None:
     print("your PC emulators, or the iiSU APK you supplied in installer/input/.\n")
 
     avd_name = detect_avd_name()
-    targets = _collect_targets(avd_name)
+    targets = collect_targets(avd_name)
     print_preview(targets)
 
     if "--yes" not in sys.argv:
@@ -184,7 +184,7 @@ def main() -> None:
     stop_running_instance()
 
     print("\n[uninstall] removing...")
-    reclaimed = sum(_remove(path) for path in targets)
+    reclaimed = sum(remove_path(path) for path in targets)
 
     print(f"\n=== Done -- reclaimed {reclaimed / 1e9:.1f} GB ===")
     print(f"Kept: installer/input/*.apk (your own file) and installer/tools/apktool.jar (a project asset).")

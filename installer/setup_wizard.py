@@ -253,7 +253,7 @@ def write_bridge_config(avd_name: str) -> None:
     The "emulators" map is seeded from shared/emulator_defaults.py the
     same way, via setdefault: a brand-new config gets the full curated
     set, but re-running this never overwrites emulator mappings someone
-    has since customized in config_editor.py."""
+    has since customized in manager.py's Emulators page."""
     sys.path.insert(0, str(PROJECT_ROOT))
     from shared.emulator_defaults import build_emulators_map
 

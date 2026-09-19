@@ -3,8 +3,9 @@ One-shot launcher for the whole iiSU-PC setup: starts the AVD if it isn't
 already running, then starts the launch bridge if it isn't already running.
 
 This is the single entry point meant for day-to-day use -- it's what runs
-when you click Start in the control panel (control_panel.py), instead of
-manually starting the emulator and the bridge as separate steps.
+when you click Open (or Stop -> Open again) on manager.py's Home page,
+instead of manually starting the emulator and the bridge as separate
+steps.
 
 Note: this intentionally does NOT use the `android emulator start` wrapper.
 That command promises to "return when the emulator is fully started," but

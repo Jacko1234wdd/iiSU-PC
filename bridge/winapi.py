@@ -1,6 +1,6 @@
 """
 Shared Win32 window-management helpers (ctypes, stdlib only) used by
-launch_bridge.py, apply_display.py, and config_editor.py.
+launch_bridge.py, apply_display.py, and manager.py.
 
 HWND is pointer-sized; without explicit argtypes/restype ctypes assumes
 32-bit ints on some of these, which silently truncates handles on 64-bit
