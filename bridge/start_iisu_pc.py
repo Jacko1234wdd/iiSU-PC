@@ -2,6 +2,9 @@
 One-shot launcher for the whole iiSU-PC setup: checks for updates to the
 project itself (updater.py), then starts the AVD if it isn't already
 running, then starts the launch bridge if it isn't already running.
+Covers a cold boot with a fullscreen black overlay (boot_overlay.py) the
+whole time, since the AVD's window isn't made fullscreen until well into
+this sequence and would otherwise leave raw desktop visible around it.
 
 This is the single entry point meant for day-to-day use -- it's what runs
 when you click Open (or Stop -> Open again) on manager.py's Home page,
@@ -39,6 +42,7 @@ import sys
 import time
 from pathlib import Path
 
+import boot_overlay
 import sync_library
 import updater
 from bridge_config import ConfigMissingError, load_config
@@ -283,6 +287,22 @@ def main() -> None:
     debug_console = config.get("debug_show_console_windows", False)
     state = {"avd_name": avd_name}
 
+    # A cold-booting AVD leaves raw desktop visible around its window
+    # until launch_bridge.py's show_iisu_window() makes it fullscreen,
+    # further down this same sequence -- covered with a fullscreen
+    # overlay for the whole stretch instead. Skipped when the AVD is
+    # already up (iiSU is presumably already on screen normally, nothing
+    # to cover) and when debug_console is on (it would just hide the
+    # console windows that setting exists to show).
+    show_overlay = not is_avd_running(avd_name) and not debug_console
+    overlay = boot_overlay.show() if show_overlay else None
+    try:
+        _run_start_sequence(config, avd_name, port, debug_console, state)
+    finally:
+        boot_overlay.close(overlay)
+
+
+def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: bool, state: dict) -> None:
     if is_avd_running(avd_name):
         print(f"[start] {avd_name} is already running.")
     else:

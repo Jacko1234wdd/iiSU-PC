@@ -38,6 +38,8 @@ Every start (either path) checks for updates first (`bridge/updater.py`). If thi
 
 Every start re-syncs your ROM library into the VM automatically, so adding or removing games just means starting iiSU-PC again — no separate step. It's a no-op if nothing's changed since the last sync (checked by comparing a fingerprint of your library against one saved in the VM itself, so it stays correct even if the VM gets rebuilt independently), so this doesn't add noticeable startup time for a large library on its second and later starts. iiSU itself still needs to notice the change: hit "Rescan full library" in its Library settings after your first start with a new game.
 
+Two moments would otherwise show raw desktop around a window that isn't fullscreen yet -- a cold-booting AVD (its window isn't made fullscreen until partway through starting up) and a game handing off from iiSU to its real PC emulator (between iiSU's window minimizing and the emulator's own window taking over). Both are covered with a fullscreen black overlay (`bridge/boot_overlay.py`) for that stretch instead. Turned off automatically while the debug console checkbox above is on, since it would just hide the windows that's for.
+
 Inside the VM, `Ctrl+Alt+Q` force-quits the current game and returns to iiSU; `Ctrl+Alt+X` closes iiSU and shuts down the VM entirely (both rebindable in Advanced). Holding **Back+Start** together on a controller for 2.5s does the same full shutdown, no keyboard needed.
 
 ## Uninstalling
@@ -79,6 +81,7 @@ bridge/
   apply_display.py         applies config.json's display settings to the AVD and cold-boots it
   start_iisu_pc.py         checks for updates, boots the AVD (if needed), and starts launch_bridge.py
   updater.py               checks for (and, on a git checkout, applies) updates before every start
+  boot_overlay.py          fullscreen black overlay covering the AVD boot / emulator hand-off gaps
   stop_iisu_pc.py          tears both back down
   launch_bridge.py         listens for launch requests from the patched APK, runs the PC emulator
   controller_bridge.py     forwards controller input into the AVD; Back+Start closes everything

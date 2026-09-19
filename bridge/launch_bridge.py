@@ -17,11 +17,14 @@ For each request, this:
      "roms_dir" by matching filename (the patched app can only tell us what
      it knows about its own Android-side content URI, not a Windows path,
      so both sides need to agree on ROM filenames living in roms_dir).
-  4. Minimizes the iiSU/AVD window, launches the matching emulator in
-     fullscreen, forces it to the foreground, and synthesizes a click so
+  4. Covers the screen with a fullscreen overlay (boot_overlay.py),
+     minimizes the iiSU/AVD window, launches the matching emulator in
+     fullscreen, forces it to the foreground, synthesizes a click so
      keyboard/controller input is picked up immediately (Qt apps track
      actual input focus on their render widget, separately from the OS-level
-     foreground window).
+     foreground window), then drops the overlay -- without it, the moment
+     between iiSU minimizing and the emulator's window taking over would
+     show raw desktop.
   5. Waits for the emulator to exit (either normally, or forced via the
      configured quit_hotkey) and restores the iiSU window (maximized if
      "iisu_fullscreen" is set), mirroring how the real Android launcher
@@ -49,6 +52,7 @@ from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import unquote
 
+import boot_overlay
 from bridge_config import ConfigMissingError, load_config
 from controller_bridge import ControllerBridge
 
@@ -514,18 +518,28 @@ def handle_request(raw_intent: str) -> None:
     if rom_path:
         args.append(str(rom_path))
 
-    iisu_hwnd = find_window_by_title(config["iisu_window_title"])
-    if iisu_hwnd is not None:
-        user32.ShowWindow(iisu_hwnd, SW_MINIMIZE)
-    else:
-        print("[bridge] could not locate iiSU window to hide")
+    # Covers the gap between iiSU's window minimizing and the real PC
+    # emulator's own window appearing and taking the foreground -- without
+    # it, that moment shows raw desktop. Skipped when debug_show_console_
+    # windows is on, since a fullscreen overlay would just hide the
+    # console windows that setting exists to show.
+    show_overlay = not config.get("debug_show_console_windows", False)
+    overlay = boot_overlay.show() if show_overlay else None
+    try:
+        iisu_hwnd = find_window_by_title(config["iisu_window_title"])
+        if iisu_hwnd is not None:
+            user32.ShowWindow(iisu_hwnd, SW_MINIMIZE)
+        else:
+            print("[bridge] could not locate iiSU window to hide")
 
-    print(f"[bridge] launching: {args}")
-    process = subprocess.Popen(args, cwd=str(executable.parent))
-    with current_process_lock:
-        global current_process
-        current_process = process
-    bring_emulator_to_foreground(process.pid)
+        print(f"[bridge] launching: {args}")
+        process = subprocess.Popen(args, cwd=str(executable.parent))
+        with current_process_lock:
+            global current_process
+            current_process = process
+        bring_emulator_to_foreground(process.pid)
+    finally:
+        boot_overlay.close(overlay)
     threading.Thread(
         target=wait_and_restore_iisu, args=(process, config), daemon=True
     ).start()
