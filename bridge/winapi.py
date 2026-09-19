@@ -162,11 +162,20 @@ _ENUM_CURRENT_SETTINGS = -1
 def get_primary_monitor_mode() -> tuple[int, int, int]:
     """Returns (width, height, refresh_hz) for the current primary monitor,
     so the setup GUI can offer to match the AVD's display profile to it
-    instead of the user guessing values by hand."""
+    instead of the user guessing values by hand.
+
+    dmDisplayFrequency coming back as 0 or 1 doesn't mean the monitor
+    actually runs at 0Hz or 1Hz -- per Microsoft's own documentation for
+    this field, both values mean "the display hardware's default refresh
+    rate," which some drivers report instead of the real number (seen in
+    practice on at least one real machine). Falls back to a sane default
+    in that case rather than handing a literal 0/1 Hz on to the AVD's
+    display profile."""
     dm = _DEVMODE()
     dm.dmSize = ctypes.sizeof(_DEVMODE)
     user32.EnumDisplaySettingsW(None, _ENUM_CURRENT_SETTINGS, ctypes.byref(dm))
-    return dm.dmPelsWidth, dm.dmPelsHeight, dm.dmDisplayFrequency
+    refresh_hz = dm.dmDisplayFrequency if dm.dmDisplayFrequency > 1 else 60
+    return dm.dmPelsWidth, dm.dmPelsHeight, refresh_hz
 
 
 def force_foreground(hwnd: int, show_state: int = SW_RESTORE) -> None:
