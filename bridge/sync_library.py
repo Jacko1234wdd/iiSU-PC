@@ -16,9 +16,9 @@ is irrelevant.
 Folder names matter though: iiSU only recognizes a folder as a console if
 its name matches one of iiSU's own known console short/long/alternate
 names (see console_names.json, extracted from iiSU's own bundled
-emuladores_default.json). This script normalizes whatever your NAS calls
-each console folder (e.g. "Playstation 1") into iiSU's expected form
-(e.g. "psx") automatically.
+emuladores_default.json). This script normalizes whatever a console
+folder happens to be named on disk (e.g. "Playstation 1") into iiSU's
+expected form (e.g. "psx") automatically.
 
 Runs automatically on every start (see start_iisu_pc.py), and skips the
 actual rebuild whenever nothing's changed since the last one -- for a
@@ -115,7 +115,7 @@ def main() -> None:
     consoles, skipped = scan_library(roms_dir, exact, by_compact)
 
     if skipped:
-        print("Skipped folders with no matching iiSU console name (rename or add to NAS_NAME_OVERRIDES):")
+        print("Skipped folders with no matching iiSU console name (rename the folder, or add it to console_names.NAME_OVERRIDES):")
         for name in skipped:
             print(f"  - {name}")
 

@@ -91,12 +91,12 @@ def _patch_config_ini(config_ini: Path) -> None:
 def disable_quickboot_autosave(avd_dir: Path) -> None:
     """The emulator rewrites its own quickbootChoice.ini on exit based on
     its current save-on-exit preference, independent of the -no-snapshot
-    launch flag -- confirmed live: passing -no-snapshot still left a fresh
-    multi-GB snapshot behind after a graceful `adb emu kill`, because this
-    file already had saveOnExit=true from some earlier run. Pinning it
-    back to false right before every launch (not just once) is what
-    actually guarantees a clean exit never leaves one behind, regardless
-    of what the previous run's exit wrote here."""
+    launch flag: a graceful `adb emu kill` still saves a multi-GB snapshot
+    if this file's saveOnExit was left true by an earlier run, regardless
+    of what flag the next launch passes. Pinning it back to false right
+    before every launch (not just once) is what actually guarantees a
+    clean exit never leaves one behind, regardless of what the previous
+    run's exit wrote here."""
     (avd_dir / "quickbootChoice.ini").write_text("saveOnExit = false\n", encoding="utf-8")
 
 

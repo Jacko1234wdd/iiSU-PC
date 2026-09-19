@@ -60,8 +60,8 @@ def _dir_size(path: Path) -> int:
 def _remove(path: Path, attempts: int = 5, delay: float = 1.0) -> int:
     """Removes a file or directory tree, retrying briefly on a locked
     file -- a process that was just stopped doesn't always release its
-    handles the instant it exits (confirmed live: this raced and left
-    ~1GB behind on the first attempt during testing). Returns the size
+    handles the instant it exits, which can otherwise leave a chunk of a
+    large directory tree behind on the first attempt. Returns the size
     reclaimed, 0 if the path didn't exist or couldn't be removed."""
     if not path.exists():
         return 0

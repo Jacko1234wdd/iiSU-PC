@@ -66,10 +66,10 @@ def kill_by_name(image_name: str) -> None:
 def _remove_path_with_retry(path: Path, attempts: int = 5, delay: float = 1.0) -> None:
     """A process that just got taskkilled doesn't always release its file
     handle the instant it exits -- Windows can hold a lock file for a
-    moment longer (confirmed live: this raced and crashed the whole
-    shutdown on the very first real test). Retrying briefly avoids that
-    for what's normally a sub-second timing gap, without ever blocking
-    indefinitely if something is genuinely still holding it."""
+    moment longer, which raises PermissionError if removal is attempted
+    immediately. Retrying briefly avoids that for what's normally a
+    sub-second timing gap, without ever blocking indefinitely if something
+    is genuinely still holding it."""
     for attempt in range(attempts):
         try:
             if path.is_dir():
@@ -104,15 +104,13 @@ def clear_snapshots(avd_name: str | None) -> None:
     """start_iisu_pc.py always cold-boots (-no-snapshot, forceColdBoot=yes,
     quickbootChoice.ini pinned to saveOnExit=false -- see portable_sdk.py),
     so a saved snapshot is never going to be loaded by anything. It gets
-    written anyway: `adb emu kill`'s own shutdown path saves one
-    regardless of all three of those settings (confirmed live, a multi-GB
-    default_boot snapshot reappeared even with every documented way to
-    disable it in place). Deleting it here, every time, is a multi-GB
-    disk leak fix rather than fighting an emulator behavior that doesn't
-    follow its own documented flags -- and it's also exactly the kind of
-    stale, no-longer-matching-reality VM state a resumed snapshot would
-    otherwise carry forward (e.g. mounts reflecting whatever was true when
-    it was captured, not what's true now)."""
+    written anyway: `adb emu kill`'s own shutdown path saves a multi-GB
+    snapshot regardless of all three of those settings. Deleting it here,
+    every time, is a disk-leak fix rather than fighting an emulator
+    behavior that doesn't follow its own documented flags -- and it's also
+    exactly the kind of stale, no-longer-matching-reality VM state a
+    resumed snapshot would otherwise carry forward (e.g. mounts reflecting
+    whatever was true when it was captured, not what's true now)."""
     avd_dir = PORTABLE_AVD_HOME / f"{avd_name}.avd" if avd_name else None
     if avd_dir is None or not avd_dir.is_dir():
         return

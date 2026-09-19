@@ -113,11 +113,11 @@ def _manifest_xml(package_name: str, app_label: str) -> str:
         f'    package="{package_name}">\n'
         # A stub with no icon at all is easy for any app-listing UI to miss
         # or visually skip -- iiSU's own "Installed Emulators" picker builds
-        # its list from a PackageManager query that should match this
-        # manifest regardless (confirmed by decompiling iiSU: plain
-        # ACTION_MAIN + CATEGORY_LAUNCHER, MATCH_ALL, no stricter category
-        # or icon requirement found), but a real icon removes the one
-        # concrete way this stub still looks different from a normal app.
+        # its list from a plain PackageManager query (ACTION_MAIN +
+        # CATEGORY_LAUNCHER, MATCH_ALL; verified by decompiling iiSU's own
+        # APK) that this manifest already satisfies with no icon at all,
+        # but a real icon removes the one concrete way this stub still
+        # looks different from a normal, fully installed app.
         f'    <application android:label="{safe_label} (iiSU-PC redirector)" android:icon="@mipmap/ic_stub" android:hasCode="true">\n'
         f'        <activity android:name="{REDIRECTOR_ACTIVITY}" android:exported="true">\n'
         '            <intent-filter>\n'

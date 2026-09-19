@@ -168,12 +168,12 @@ def find_emulator_for_package(package: str, emulators: dict, rom_filename: str |
     android_core (the intent's LIBRETRO extra, when present) takes priority
     over that extension guess whenever it resolves to a known Windows core
     -- it's the *actual* core iiSU/RetroArch decided to launch with, which
-    can legitimately differ from this project's own curated default (a real
-    ROM confirmed this live: a .zip-packaged 32X game, an extension not even
-    in the curated map, launched by iiSU with PicoDrive rather than the
-    curated Genesis Plus GX). The exe_names/pre_args *shape* still comes
-    from an existing by_extension entry -- only the resolved core filename
-    is substituted in -- so config.json stays the source of truth for how
+    can legitimately differ from this project's own curated default (e.g.
+    a .zip-packaged ROM has no extension the curated map would recognize
+    at all, or the console's default core has since been changed on the
+    Android side). The exe_names/pre_args *shape* still comes from an
+    existing by_extension entry -- only the resolved core filename is
+    substituted in -- so config.json stays the source of truth for how
     RetroArch itself gets invoked, not a hardcoded literal here."""
     for prefix, profile in emulators.items():
         if not package.startswith(prefix):
@@ -359,11 +359,11 @@ def handle_request(raw_intent: str) -> None:
     ]
     # RetroArch launches (and possibly other libretro-frontend launches)
     # pass the ROM and the exact core to use as plain Intent extras instead
-    # of a data URI/ClipData -- confirmed live: iiSU launches RetroArch
-    # exclusively this way, never through the URI mechanism every other
-    # emulator here uses, so without parsing these, RetroArch games never
-    # launched at all regardless of how config.json's by_extension map was
-    # set up. The smali patch already sends every extra as "EXTRA:key=value".
+    # of a data URI/ClipData -- iiSU launches RetroArch exclusively this
+    # way, never through the URI mechanism every other emulator here uses,
+    # so these have to be parsed separately or RetroArch games never
+    # launch regardless of how config.json's by_extension map is set up.
+    # The smali patch already sends every extra as "EXTRA:key=value".
     extras = dict(
         line.removeprefix("EXTRA:").split("=", 1)
         for line in raw_intent.splitlines()

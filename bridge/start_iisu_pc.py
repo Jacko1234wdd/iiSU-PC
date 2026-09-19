@@ -234,12 +234,10 @@ def start_avd(avd_name: str, usb_passthrough: list[dict]) -> int | None:
 def sync_rom_library() -> None:
     """Keeps the AVD's placeholder ROM tree in sync with the real library
     on every start, rather than requiring a separate manual sync_library.py
-    run the onboarding wizard never mentions and nothing else ever calls --
-    confirmed live: without this, /sdcard/Roms never gets created at all,
-    so iiSU has nothing to scan no matter how the ROM directory is
-    configured. A sync failure (e.g. roms_dir temporarily unreachable on a
-    network share) shouldn't block starting the bridge, so this only
-    reports it."""
+    run -- without this, /sdcard/Roms never gets created at all, so iiSU
+    has nothing to scan no matter how the ROM directory is configured. A
+    sync failure (e.g. roms_dir temporarily unreachable on a network
+    share) shouldn't block starting the bridge, so this only reports it."""
     try:
         sync_library.main()
     except SystemExit as e:

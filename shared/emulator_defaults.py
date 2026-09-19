@@ -200,12 +200,12 @@ def retroarch_core_dll_for_android_core(android_core_filename: str) -> str | Non
     itself reports launching (the LIBRETRO intent extra) into the matching
     Windows core .dll filename, so a RetroArch launch uses whichever core
     is actually configured on the Android side instead of this module's
-    own per-extension guess (RETROARCH_BY_EXTENSION) -- confirmed live:
-    iiSU launched a 32X ROM with picodrive_libretro_android.so where the
-    curated default for that extension guesses Genesis Plus GX, a real,
-    user-visible mismatch this avoids whenever the extra is present.
-    Returns None if the filename doesn't look like a libretro-android core
-    at all, so the caller can fall back to the extension-based guess."""
+    own per-extension guess (RETROARCH_BY_EXTENSION) -- the two can
+    legitimately disagree, since the curated guess is only a reasonable
+    per-console default, not necessarily what a given install actually
+    has configured. Returns None if the filename doesn't look like a
+    libretro-android core at all, so the caller can fall back to the
+    extension-based guess."""
     if not android_core_filename.endswith("_libretro_android.so"):
         return None
     core_name = android_core_filename.removesuffix("_libretro_android.so")
