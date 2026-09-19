@@ -19,10 +19,11 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import sdk_bootstrap
-from patch_iisu import patch_apk
+from patch_iisu import patch_apk, validate_iisu_apk
 
 INSTALLER_DIR = Path(__file__).parent
 PROJECT_ROOT = INSTALLER_DIR.parent
@@ -37,6 +38,17 @@ WORK_DIR = INSTALLER_DIR / "_work"
 DEFAULT_AVD_NAME = "iisuwin"
 DEFAULT_DISPLAY = {"width": 1920, "height": 1080, "density": 240, "refresh_rate": 144}
 AVD_BOOT_TIMEOUT = 180
+MIN_FREE_DISK_GB = 15
+
+SETUP_STAGES = [
+    "Checking prerequisites",
+    "Setting up the Android SDK and AVD",
+    "Preparing the signing key",
+    "Patching iiSU",
+    "Copying to the portable AVD",
+    "Installing iiSU and redirector stubs",
+    "Finishing up",
+]
 
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
@@ -45,6 +57,24 @@ CREATE_NEW_PROCESS_GROUP = 0x00000200
 def find_input_apk() -> Path | None:
     apks = list(INPUT_DIR.glob("*.apk"))
     return apks[0] if apks else None
+
+
+def check_disk_space() -> None:
+    """The installer's own SDK copy and the portable copy under bridge/
+    briefly coexist before cleanup_installer_sdk() reclaims the first one,
+    so peak usage during setup is well above what either copy needs alone
+    -- checked up front so a low-disk failure surfaces in a second, not
+    partway through a multi-GB download."""
+    usage = shutil.disk_usage(INSTALLER_DIR)
+    free_gb = usage.free / 1e9
+    if free_gb < MIN_FREE_DISK_GB:
+        raise RuntimeError(
+            f"Only {free_gb:.1f} GB free on the drive holding {INSTALLER_DIR} -- this setup needs "
+            f"about {MIN_FREE_DISK_GB} GB (the SDK/AVD images are briefly duplicated between the "
+            "installer's own copy and the portable copy under bridge/ before cleanup). Free up some "
+            "space and run this again."
+        )
+    print(f"[setup] {free_gb:.1f} GB free -- enough room for setup.")
 
 
 def require_java() -> None:
@@ -301,23 +331,42 @@ def create_desktop_shortcut(apk_path: Path) -> None:
         print(f"[setup] couldn't create a desktop shortcut ({e}) -- you can still use iiSU-PC.bat directly")
 
 
-def run_setup(apk_path: Path) -> None:
+def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None = None) -> None:
     """Does the actual work, given a source APK path -- shared by the CLI
     entry point below and setup_gui.py, so both stay in sync with exactly
     one implementation. Reports progress via plain print(), which the GUI
-    captures by redirecting sys.stdout for the duration of the call."""
+    captures by redirecting sys.stdout for the duration of the call.
+
+    on_stage (if given) is called at the start of each of SETUP_STAGES, so
+    a GUI can show "Step 3/7: ..." somewhere more durable than a scrolling
+    log -- the whole run used to be one indeterminate spinner from start to
+    finish, which gives no sense of whether a several-minute step is normal
+    progress or actually stuck."""
+    total = len(SETUP_STAGES)
+
+    def stage(index: int) -> None:
+        label = SETUP_STAGES[index]
+        print(f"\n=== Step {index + 1}/{total}: {label} ===")
+        if on_stage:
+            on_stage(label, index + 1, total)
+
     print("=== iiSU-PC first-time setup ===\n")
+    stage(0)
     require_java()
     print(f"[setup] using {apk_path.name} as the source APK")
+    validate_iisu_apk(apk_path)
+    check_disk_space()
 
     WORK_DIR.mkdir(parents=True, exist_ok=True)
 
-    print("[setup] setting up the Android SDK and a fresh AVD (this can take a long time on first run -- several GB)...")
+    stage(1)
     avd_dir = sdk_bootstrap.ensure_sdk_and_avd(DEFAULT_AVD_NAME)
     print(f"[setup] AVD ready: {avd_dir}")
 
+    stage(2)
     keystore, keystore_password = ensure_keystore()
 
+    stage(3)
     patched_apk = WORK_DIR / "iisu-patched.apk"
     patch_apk(
         source_apk=apk_path,
@@ -333,7 +382,7 @@ def run_setup(apk_path: Path) -> None:
     sys.path.insert(0, str(BRIDGE_DIR))
     import portable_sdk
 
-    print("[setup] copying the SDK/AVD into bridge/ as a portable, self-contained copy...")
+    stage(4)
     env_overrides = portable_sdk.ensure_portable_sdk(DEFAULT_AVD_NAME, sdk_bootstrap.SDK_ROOT)
 
     import os
@@ -341,8 +390,10 @@ def run_setup(apk_path: Path) -> None:
     env.update(env_overrides)
     emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / "emulator.exe"
 
+    stage(5)
     boot_avd_and_install(emulator_exe, DEFAULT_AVD_NAME, env, patched_apk)
 
+    stage(6)
     write_bridge_config(DEFAULT_AVD_NAME)
     cleanup_installer_sdk()
     create_desktop_shortcut(apk_path)

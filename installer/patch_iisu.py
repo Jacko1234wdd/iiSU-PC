@@ -19,6 +19,7 @@ unrelated startActivity calls elsewhere -- see find_enclosing_method().
 import re
 import shutil
 import subprocess
+import zipfile
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
@@ -39,6 +40,32 @@ def run(args: list[str], **kwargs) -> subprocess.CompletedProcess:
     if result.returncode != 0:
         raise RuntimeError(f"command failed ({' '.join(args)}):\n{result.stdout}\n{result.stderr}")
     return result
+
+
+def validate_iisu_apk(apk_path: Path) -> None:
+    """Cheap pre-check that apk_path is actually iiSU, so a wrong file gets
+    rejected in under a second instead of after a multi-GB SDK download and
+    a full apktool decompile (the point where find_main_activity_smali()
+    would otherwise be the first thing to notice). Searches the raw dex
+    bytes for the same log-string anchor the real patch is anchored on --
+    an ASCII string constant lands in the dex's string pool as contiguous
+    UTF-8 bytes, so a plain byte search finds it without decompiling
+    anything."""
+    if not zipfile.is_zipfile(apk_path):
+        raise RuntimeError(f"{apk_path} is not a valid APK (not a zip file).")
+
+    anchor_bytes = LOG_ANCHOR.encode("utf-8")
+    with zipfile.ZipFile(apk_path) as z:
+        dex_names = [n for n in z.namelist() if re.fullmatch(r"classes\d*\.dex", n)]
+        if not dex_names:
+            raise RuntimeError(f"{apk_path.name} has no classes.dex -- it doesn't look like a valid Android APK.")
+        found = any(anchor_bytes in z.read(name) for name in dex_names)
+
+    if not found:
+        raise RuntimeError(
+            f"{apk_path.name} doesn't look like iiSU -- couldn't find its ROM-launch code in it. "
+            "Double check this is the right APK (this tool only patches iiSU itself)."
+        )
 
 
 def decompile(apk_path: Path, out_dir: Path) -> None:

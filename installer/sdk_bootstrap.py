@@ -20,6 +20,7 @@ search_roots already assumes).
 
 import shutil
 import subprocess
+import threading
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -57,11 +58,30 @@ def is_sdk_ready() -> bool:
     )
 
 
+def _make_download_reporthook():
+    """A urlretrieve reporthook that prints every 10% instead of every
+    block -- there'd otherwise be one line per 8KB chunk, and with nothing
+    printed at all a ~156MB download over a slow connection looks
+    indistinguishable from a hang."""
+    state = {"last_reported": -10}
+
+    def reporthook(block_num: int, block_size: int, total_size: int) -> None:
+        if total_size <= 0:
+            return
+        downloaded = min(block_num * block_size, total_size)
+        percent = int(downloaded * 100 / total_size)
+        if percent >= state["last_reported"] + 10 or percent == 100:
+            print(f"[sdk]   ...{percent}% ({downloaded / 1e6:.0f} / {total_size / 1e6:.0f} MB)")
+            state["last_reported"] = percent
+
+    return reporthook
+
+
 def download_commandline_tools() -> Path:
     zip_path = SCRIPT_DIR / "commandlinetools.zip"
     if not zip_path.is_file():
         print("[sdk] downloading Android command-line tools (~156 MB)...")
-        urllib.request.urlretrieve(COMMANDLINETOOLS_URL, zip_path)
+        urllib.request.urlretrieve(COMMANDLINETOOLS_URL, zip_path, reporthook=_make_download_reporthook())
     return zip_path
 
 
@@ -93,6 +113,29 @@ def _package_already_installed(package: str) -> bool:
     return (SDK_ROOT / package).is_dir()
 
 
+def _run_with_heartbeat(args: list[str], what: str, interval: float = 15.0) -> None:
+    """`android sdk install` gives no output of its own worth showing (see
+    the note below on why its exit code isn't trustworthy either), so a
+    multi-GB system image install would otherwise sit in total silence for
+    several minutes -- indistinguishable from having actually hung. This
+    just proves it's still alive."""
+    stop = threading.Event()
+
+    def heartbeat() -> None:
+        elapsed = 0.0
+        while not stop.wait(interval):
+            elapsed += interval
+            print(f"[sdk]   ...still installing {what} ({int(elapsed)}s elapsed)")
+
+    thread = threading.Thread(target=heartbeat, daemon=True)
+    thread.start()
+    try:
+        subprocess.run(args, capture_output=True, text=True)
+    finally:
+        stop.set()
+        thread.join()
+
+
 def install_packages() -> None:
     for package in PACKAGES:
         if _package_already_installed(package):
@@ -103,7 +146,7 @@ def install_packages() -> None:
         # actually succeeded -- likely a progress-bar/non-TTY quirk), so
         # success is checked below by looking for the resulting files
         # rather than trusting the return code.
-        subprocess.run([str(android_exe()), f"--sdk={SDK_ROOT}", "sdk", "install", package], capture_output=True, text=True)
+        _run_with_heartbeat([str(android_exe()), f"--sdk={SDK_ROOT}", "sdk", "install", package], what=package)
 
     if not is_sdk_ready():
         raise RuntimeError(

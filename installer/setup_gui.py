@@ -158,7 +158,7 @@ class SetupApp(tk.Tk):
         sys.stdout = writer
         error: Exception | None = None
         try:
-            setup_wizard.run_setup(apk_path)
+            setup_wizard.run_setup(apk_path, on_stage=self._on_stage)
         except Exception as e:  # noqa: BLE001 -- surfaced to the user below, not swallowed
             error = e
             print(f"\n[setup] FAILED: {e}\n")
@@ -166,6 +166,14 @@ class SetupApp(tk.Tk):
         finally:
             sys.stdout = old_stdout
         self.after(0, self._on_setup_finished, error)
+
+    def _on_stage(self, label: str, index: int, total: int) -> None:
+        # Called from the worker thread -- self.after() is safe to call
+        # from any thread, it just schedules onto the Tk main loop.
+        self.after(0, self._apply_stage, label, index, total)
+
+    def _apply_stage(self, label: str, index: int, total: int) -> None:
+        self.status_label.config(text=f"Step {index}/{total}: {label}...", fg=TEXT_DIM)
 
     def _on_setup_finished(self, error: Exception | None) -> None:
         self.running = False
