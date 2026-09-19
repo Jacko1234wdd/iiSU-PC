@@ -37,7 +37,12 @@ WORK_DIR = INSTALLER_DIR / "_work"
 
 DEFAULT_AVD_NAME = "iisuwin"
 DEFAULT_DISPLAY = {"width": 1920, "height": 1080, "density": 240, "refresh_rate": 144}
-AVD_BOOT_TIMEOUT = 180
+# Generous on purpose: without hardware virtualization (Hyper-V/WHPX on
+# Windows, or disabled in the BIOS/UEFI) the emulator falls back to pure
+# software rendering, and a first cold boot -- creating the userdata
+# partition from scratch, not just resuming one -- can genuinely take
+# several minutes there instead of well under one.
+AVD_BOOT_TIMEOUT = 420
 MIN_FREE_DISK_GB = 15
 
 SETUP_STAGES = [
@@ -174,6 +179,7 @@ def is_avd_connected() -> bool:
 
 def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_apk: Path) -> None:
     process = None
+    log_path = WORK_DIR / "first_boot_emulator.log"
     if is_avd_connected():
         # Resuming after an earlier failed attempt at this exact step: the
         # emulator runs fully detached, so a previous run raising an
@@ -186,7 +192,6 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
         print("[setup] booting the AVD once to install iiSU (this can take a minute)...")
         import portable_sdk
         portable_sdk.disable_quickboot_autosave(portable_sdk.PORTABLE_AVD_HOME / f"{avd_name}.avd")
-        log_path = WORK_DIR / "first_boot_emulator.log"
         log_file = open(log_path, "wb")
         try:
             process = subprocess.Popen(
@@ -207,7 +212,24 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
             log_file.close()
 
     if not wait_for_avd(avd_name, AVD_BOOT_TIMEOUT):
-        raise RuntimeError(f"The AVD did not come up within {AVD_BOOT_TIMEOUT}s on its first boot. See {log_path} for details.")
+        print(f"[setup] the AVD did not come up within {AVD_BOOT_TIMEOUT}s on its first boot.")
+        if log_path.is_file():
+            print(f"[setup] last lines of {log_path}:")
+            for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-25:]:
+                print(f"    {line}")
+        else:
+            print(
+                "[setup] no log file to show -- an AVD instance from an earlier attempt is still "
+                "running but never finished booting either. A slow, non-hardware-accelerated boot "
+                "(no Hyper-V/WHPX, or virtualization disabled in BIOS) is the most common cause."
+            )
+        raise RuntimeError(
+            f"The AVD did not come up within {AVD_BOOT_TIMEOUT}s on its first boot. If your PC doesn't "
+            "have hardware virtualization enabled (Hyper-V/Windows Hypervisor Platform on Windows, or "
+            "virtualization enabled in your BIOS/UEFI), the emulator falls back to pure software "
+            "rendering and can take several minutes instead of under a minute -- re-running Setup.bat "
+            "resumes from here rather than starting over."
+        )
 
     print("[setup] installing the patched iiSU...")
     result = None

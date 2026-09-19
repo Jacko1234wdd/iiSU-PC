@@ -53,7 +53,11 @@ STATE_PATH = Path(__file__).parent / ".runtime_state.json"
 EMULATOR_LOG_PATH = Path(__file__).parent / "emulator.log"
 BRIDGE_LOG_PATH = Path(__file__).parent / "bridge.log"
 
-AVD_BOOT_TIMEOUT = 120  # seconds
+# Generous on purpose: without hardware virtualization (Hyper-V/WHPX on
+# Windows, or disabled in the BIOS/UEFI) the emulator falls back to pure
+# software rendering, which can take several minutes even for a normal
+# (already-set-up) boot -- see the matching constant in setup_wizard.py.
+AVD_BOOT_TIMEOUT = 300  # seconds
 MAX_LAUNCH_ATTEMPTS = 3
 RETRY_DELAY = 5  # seconds
 
@@ -211,7 +215,11 @@ def _launch_once(emulator_exe: Path, avd_name: str, env: dict, usb_passthrough: 
                     print(f"    {line}")
             return None
         time.sleep(2)
-    print(f"[start] {avd_name} did not report ready within {AVD_BOOT_TIMEOUT}s.")
+    print(
+        f"[start] {avd_name} did not report ready within {AVD_BOOT_TIMEOUT}s. If your PC doesn't have "
+        "hardware virtualization enabled (Hyper-V/Windows Hypervisor Platform, or in your BIOS/UEFI), "
+        "the emulator falls back to pure software rendering and can take several minutes."
+    )
     return None
 
 
